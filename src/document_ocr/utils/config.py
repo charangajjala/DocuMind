@@ -1,0 +1,106 @@
+"""Configuration management utilities."""
+
+import os
+from typing import Any, Dict, Optional
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+    DOTENV_AVAILABLE = True
+except ImportError:
+    DOTENV_AVAILABLE = False
+
+from ..core.interfaces import ConfigurationProvider
+from ..core.exceptions import ConfigurationError
+
+
+class EnvironmentConfigProvider(ConfigurationProvider):
+    """Configuration provider that reads from environment variables and config files."""
+    
+    def __init__(self, config_file_path: Optional[str] = None):
+        """Initialize with optional config file path."""
+        if config_file_path is None:
+            # Look for .env file in project root or config directory
+            from pathlib import Path
+            project_root = Path(__file__).parent.parent.parent.parent
+            env_paths = [
+                project_root / ".env",
+                project_root / "config" / ".env"
+            ]
+            for env_path in env_paths:
+                if env_path.exists():
+                    config_file_path = str(env_path)
+                    break
+        
+        self.config_file_path = config_file_path
+        self._config_cache: Dict[str, Any] = {}
+        self._load_config()
+    
+    def _load_config(self) -> None:
+        """Load configuration from environment and files."""
+        # Load from .env file if found and dotenv is available
+        if self.config_file_path and DOTENV_AVAILABLE:
+            load_dotenv(self.config_file_path)
+        
+        # Default configuration
+        self._config_cache = {
+            'GOOGLE_APPLICATION_CREDENTIALS': os.getenv('GOOGLE_APPLICATION_CREDENTIALS'),
+            'GOOGLE_CLOUD_PROJECT': os.getenv('GOOGLE_CLOUD_PROJECT'),
+            'DOCUMENT_AI_PROCESSOR_ID': os.getenv('DOCUMENT_AI_PROCESSOR_ID'),
+            'DOCUMENT_AI_LOCATION': os.getenv('DOCUMENT_AI_LOCATION', 'us'),
+            'API_HOST': os.getenv('API_HOST', '0.0.0.0'),
+            'API_PORT': int(os.getenv('API_PORT', '8000')),
+            'STREAMLIT_HOST': os.getenv('STREAMLIT_HOST', '0.0.0.0'),
+            'STREAMLIT_PORT': int(os.getenv('STREAMLIT_PORT', '8501')),
+            'LOG_LEVEL': os.getenv('LOG_LEVEL', 'INFO'),
+            'MAX_IMAGE_SIZE': int(os.getenv('MAX_IMAGE_SIZE', '41943040')),  # 40MB for Google Document AI online OCR
+            'ALLOWED_IMAGE_TYPES': os.getenv('ALLOWED_IMAGE_TYPES', 'jpg,jpeg,png,pdf,tiff').split(','),
+            'OCR_CONFIDENCE_THRESHOLD': float(os.getenv('OCR_CONFIDENCE_THRESHOLD', '0.8')),
+            
+            # Image Processing Configuration
+            'MAX_IMAGE_WIDTH': int(os.getenv('MAX_IMAGE_WIDTH', '4096')),
+            'MAX_IMAGE_HEIGHT': int(os.getenv('MAX_IMAGE_HEIGHT', '4096')),
+            'ENHANCE_IMAGE': os.getenv('ENHANCE_IMAGE', 'false').lower() == 'true',
+        }
+        
+        # Load from config file if specified and dotenv not available
+        if self.config_file_path and Path(self.config_file_path).exists() and not DOTENV_AVAILABLE:
+            self._load_from_file()
+    
+    def _load_from_file(self) -> None:
+        """Load configuration from file (simple key=value format)."""
+        try:
+            with open(self.config_file_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        self._config_cache[key.strip()] = value.strip()
+        except Exception as e:
+            raise ConfigurationError(f"Failed to load config file: {str(e)}")
+    
+    def get_config(self, key: str, default: Any = None) -> Any:
+        """Get configuration value by key."""
+        return self._config_cache.get(key, default)
+    
+    def get_all_config(self) -> Dict[str, Any]:
+        """Get all configuration values."""
+        return self._config_cache.copy()
+    
+    def validate_required_config(self) -> None:
+        """Validate that all required configuration is present."""
+        required_keys = [
+            'GOOGLE_CLOUD_PROJECT',
+            'DOCUMENT_AI_PROCESSOR_ID'
+        ]
+        
+        # GOOGLE_APPLICATION_CREDENTIALS is optional when using ADC
+        missing_keys = []
+        for key in required_keys:
+            if not self.get_config(key):
+                missing_keys.append(key)
+        
+        if missing_keys:
+            raise ConfigurationError(
+                f"Missing required configuration: {', '.join(missing_keys)}"
+            )

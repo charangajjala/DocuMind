@@ -1,0 +1,20 @@
+[project]
+name = "document-ocr-api"
+version = "0.1.0"
+description = "Document OCR API using Google Document AI with React frontend and FastAPI backend"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "google-cloud-documentai>=3.5.0",
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "pillow>=10.0.0",
+    "opencv-python>=4.8.0",
+    "numpy>=1.24.0",
+    "matplotlib>=3.7.0",
+    "pydantic>=2.4.0",
+    "python-multipart>=0.0.6",
+    "httpx>=0.25.0",
+    "python-dotenv>=1.0.0",
+    "watchdog>=6.0.0",
+]
