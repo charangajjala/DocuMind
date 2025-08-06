@@ -48,6 +48,10 @@ class EnvironmentConfigProvider(ConfigurationProvider):
             'GOOGLE_CLOUD_PROJECT': os.getenv('GOOGLE_CLOUD_PROJECT'),
             'DOCUMENT_AI_PROCESSOR_ID': os.getenv('DOCUMENT_AI_PROCESSOR_ID'),
             'DOCUMENT_AI_LOCATION': os.getenv('DOCUMENT_AI_LOCATION', 'us'),
+            'AZURE_OPENAI_API_KEY': os.getenv('AZURE_OPENAI_API_KEY'),
+            'AZURE_OPENAI_ENDPOINT': os.getenv('AZURE_OPENAI_ENDPOINT'),
+            'AZURE_OPENAI_DEPLOYMENT_NAME': os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', 'gpt-4o'),
+            'AZURE_OPENAI_API_VERSION': os.getenv('AZURE_OPENAI_API_VERSION', '2024-05-13'),
             'API_HOST': os.getenv('API_HOST', '0.0.0.0'),
             'API_PORT': int(os.getenv('API_PORT', '8000')),
             'STREAMLIT_HOST': os.getenv('STREAMLIT_HOST', '0.0.0.0'),
@@ -82,6 +86,17 @@ class EnvironmentConfigProvider(ConfigurationProvider):
     def get_config(self, key: str, default: Any = None) -> Any:
         """Get configuration value by key."""
         return self._config_cache.get(key, default)
+    
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get configuration value by key (alias for get_config)."""
+        return self.get_config(key, default)
+    
+    def get_required(self, key: str) -> Any:
+        """Get a required configuration value, raises exception if not found."""
+        value = self.get_config(key)
+        if value is None:
+            raise ConfigurationError(f"Required configuration key '{key}' not found")
+        return value
     
     def get_all_config(self) -> Dict[str, Any]:
         """Get all configuration values."""

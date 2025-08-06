@@ -1,11 +1,11 @@
 import './App.css'
-import { OCRApp } from './components/OCRApp'
+import { ImprovedOCRApp } from './components/ImprovedOCRApp'
 import { ThemeProvider } from './components/theme-provider'
 
 function App() {
   return (
     <ThemeProvider defaultTheme="system" storageKey="vite-ui-theme">
-      <OCRApp />
+      <ImprovedOCRApp />
     </ThemeProvider>
   )
 }

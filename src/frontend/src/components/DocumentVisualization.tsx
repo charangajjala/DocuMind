@@ -1,4 +1,4 @@
-import { useCallback, useState, useRef, useEffect } from 'react';
+import { useCallback, useState, useRef, useEffect, useMemo } from 'react';
 import type { TextBlock } from '@/types/api';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -37,7 +37,7 @@ export function DocumentVisualization({
   const [imageNaturalSize, setImageNaturalSize] = useState({ width: 0, height: 0 });
   const [zoomLevel, setZoomLevel] = useState(1);
   const internalHoveredBlockRef = useRef<number | null>(null);
-  const mousePositionRef = useRef({ x: 0, y: 0 });
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const [isDragging] = useState(false);
 
   // Derived state
@@ -162,56 +162,7 @@ export function DocumentVisualization({
         });
       }
       
-      // Draw connector lines from bbox corners to popup corners for hovered blocks
-      if (isHovered && !isSelected && popupPosition) {
-        // Calculate popup corners (relative to canvas)
-        const popupWidth = 180; // ultra compact
-        const popupHeight = 65; // minimal height
-        const px = popupPosition.left;
-        const py = popupPosition.top;
-        // Clamp popup to canvas
-        const popupRect = {
-          left: px,
-          top: py,
-          right: px + popupWidth,
-          bottom: py + popupHeight
-        };
-        // Bbox corners
-        const bboxCorners = [
-          { x: x, y: y }, // top-left
-          { x: x + width, y: y }, // top-right
-          { x: x, y: y + height }, // bottom-left
-          { x: x + width, y: y + height } // bottom-right
-        ];
-        // Popup corners
-        const popupCorners = [
-          { x: popupRect.left, y: popupRect.top }, // top-left
-          { x: popupRect.right, y: popupRect.top }, // top-right
-          { x: popupRect.left, y: popupRect.bottom }, // bottom-left
-          { x: popupRect.right, y: popupRect.bottom } // bottom-right
-        ];
-        // Draw lines from bbox corners to nearest popup corner
-        ctx.save();
-        ctx.strokeStyle = baseColor;
-        ctx.lineWidth = 2;
-        bboxCorners.forEach((bc, i) => {
-          // Find nearest popup corner
-          let minDist = Infinity;
-          let nearest = popupCorners[0];
-          popupCorners.forEach(pc => {
-            const dist = Math.hypot(bc.x - pc.x, bc.y - pc.y);
-            if (dist < minDist) {
-              minDist = dist;
-              nearest = pc;
-            }
-          });
-          ctx.beginPath();
-          ctx.moveTo(bc.x, bc.y);
-          ctx.lineTo(nearest.x, nearest.y);
-          ctx.stroke();
-        });
-        ctx.restore();
-      }
+
     });
   }, [displayWidth, displayHeight, filteredBlocks, selectedBlockIndex, hoveredBlock, imageLoaded, zoomLevel]);
 
@@ -270,9 +221,6 @@ export function DocumentVisualization({
     const coords = getCanvasCoordinates(event);
     if (!coords) return;
 
-    // Update mouse position ref instantly
-    mousePositionRef.current = { x: coords.canvasX, y: coords.canvasY };
-
     // Only update hover if we're not receiving external hover
     if (hoveredBlockIndex === undefined) {
       let foundBlock = null;
@@ -289,8 +237,13 @@ export function DocumentVisualization({
         }
       }
       // Direct update like text element hover - simple and immediate
-      internalHoveredBlockRef.current = foundBlock;
-      onBlockHover?.(foundBlock);
+      if (internalHoveredBlockRef.current !== foundBlock) {
+        internalHoveredBlockRef.current = foundBlock;
+        onBlockHover?.(foundBlock);
+      }
+      
+      // Always update mouse position when over canvas for popup positioning
+      setMousePosition({ x: coords.canvasX, y: coords.canvasY });
     }
   }, [filteredBlocks, hoveredBlockIndex, onBlockHover, getCanvasCoordinates]);
 
@@ -301,8 +254,8 @@ export function DocumentVisualization({
     }
   }, [drawCanvas]);
 
-  // Get popup position - relative to canvas container
-  const getPopupPosition = () => {
+  // Get popup position - relative to canvas container - memoized to prevent flickering
+  const popupPosition = useMemo(() => {
     if (hoveredBlock === null || !filteredBlocks[hoveredBlock]) return null;
 
     const block = filteredBlocks[hoveredBlock];
@@ -317,16 +270,14 @@ export function DocumentVisualization({
         top: Math.max(10, blockCenterY - 32),
       };
     } else {
-      // Canvas hover - position relative to mouse on canvas (from ref)
-      const { x, y } = mousePositionRef.current;
+      // Canvas hover - position relative to mouse on canvas 
+      const { x, y } = mousePosition;
       return {
         left: Math.min(x + 15, displayWidth - 180),
         top: Math.max(10, y - 10),
       };
     }
-  };
-
-  const popupPosition = getPopupPosition();
+  }, [hoveredBlock, filteredBlocks, hoveredBlockIndex, displayWidth, displayHeight, mousePosition]);
 
   return (
     <Card className={cn("relative", className)}>
@@ -390,6 +341,7 @@ export function DocumentVisualization({
                 onMouseMove={handleCanvasMouseMove}
                 onMouseLeave={() => {
                   internalHoveredBlockRef.current = null;
+                  setMousePosition({ x: 0, y: 0 });
                   onBlockHover?.(null);
                 }}
                 className="cursor-crosshair bg-white"
