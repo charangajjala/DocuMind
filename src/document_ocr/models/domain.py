@@ -1,8 +1,9 @@
 """Core domain models for document OCR."""
 
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any
 from dataclasses import dataclass
 from pydantic import BaseModel
+from enum import Enum
 
 
 @dataclass
@@ -152,5 +153,227 @@ class OCRResponse(BaseModel):
                     "file_size": 245760,
                     "format": "PNG"
                 }
+            }
+        }
+
+
+# Enhanced API Models for Structured Extraction
+
+class StructuredExtractionRequest(BaseModel):
+    """Request model for structured data extraction API."""
+    
+    image_data: str  # base64 encoded image
+    json_schema: dict  # JSON schema for extraction
+    user_prompt: Optional[str] = None  # Additional user instructions
+    document_type: Optional[str] = None  # Document type hint for specialized prompts
+    confidence_threshold: float = 0.8
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "image_data": "base64_encoded_image_string",
+                "json_schema": {
+                    "type": "object",
+                    "properties": {
+                        "field_1": {"type": "string"},
+                        "field_2": {"type": "string", "format": "date"},
+                        "field_3": {"type": "number"}
+                    },
+                    "required": ["field_1", "field_2", "field_3"]
+                },
+                "user_prompt": "Focus on the header section for important details",
+                "document_type": "document",
+                "confidence_threshold": 0.8
+            }
+        }
+
+
+class ExtractionSource(str, Enum):
+    """Enum for different extraction sources."""
+    OCR_GROUNDED = "ocr_grounded"  # LLM and OCR both agree on the field value
+    VISUAL_ONLY = "visual_only"   # LLM extracted from visual context, no OCR grounding
+    FAILED = "failed"             # Both LLM and OCR failed to extract this field
+
+
+@dataclass
+class EnhancedGroundedDataField:
+    """Enhanced grounded data field with detailed extraction information."""
+    
+    field_name: str
+    value: Any
+    confidence: float
+    extraction_source: ExtractionSource
+    source_text_blocks: List[int]  # OCR text block indices (empty if visual_only or failed)
+    bounding_boxes: List[BoundingBox]  # Corresponding bounding boxes (empty if failed)
+    reasoning: str  # Explanation of extraction decision
+    ocr_text_found: Optional[str] = None  # The actual OCR text that was matched (if any)
+    visual_description: Optional[str] = None  # Description of visual location/context
+    
+    @property
+    def is_ocr_grounded(self) -> bool:
+        """Check if this field has OCR grounding."""
+        return self.extraction_source == ExtractionSource.OCR_GROUNDED
+    
+    @property
+    def is_visual_only(self) -> bool:
+        """Check if this field was extracted visually only."""
+        return self.extraction_source == ExtractionSource.VISUAL_ONLY
+    
+    @property
+    def is_extraction_failed(self) -> bool:
+        """Check if extraction failed for this field."""
+        return self.extraction_source == ExtractionSource.FAILED
+    
+    def __str__(self) -> str:
+        status = f"[{self.extraction_source.value.upper()}]"
+        return f"EnhancedGroundedDataField({status} field='{self.field_name}', value='{self.value}', confidence={self.confidence:.2f})"
+
+
+@dataclass
+class ExtractionStatistics:
+    """Statistics about the extraction process."""
+    
+    total_fields_requested: int
+    ocr_grounded_count: int
+    visual_only_count: int
+    failed_count: int
+    average_confidence: float
+    ocr_agreement_rate: float  # Percentage of fields where LLM and OCR agreed
+    
+    @property
+    def success_rate(self) -> float:
+        """Calculate overall extraction success rate."""
+        if self.total_fields_requested == 0:
+            return 0.0
+        return (self.ocr_grounded_count + self.visual_only_count) / self.total_fields_requested
+    
+    @property
+    def visual_enhancement_rate(self) -> float:
+        """Rate at which visual analysis provided value beyond OCR."""
+        if self.total_fields_requested == 0:
+            return 0.0
+        return self.visual_only_count / self.total_fields_requested
+
+
+@dataclass  
+class EnhancedStructuredExtractionResult:
+    """Enhanced result of structured data extraction with detailed grounding analysis."""
+    
+    extracted_data: Dict[str, Any]
+    enhanced_grounded_fields: List[EnhancedGroundedDataField]
+    json_schema: Dict[str, Any]
+    ocr_results: 'DocumentOCRResult'
+    processing_time: float
+    llm_confidence: float
+    schema_validation_passed: bool
+    extraction_statistics: ExtractionStatistics
+    errors: List[str]
+    
+    def get_field_by_name(self, field_name: str) -> Optional[EnhancedGroundedDataField]:
+        """Get enhanced grounded field by name."""
+        for field in self.enhanced_grounded_fields:
+            if field.field_name == field_name:
+                return field
+        return None
+    
+    def get_fields_by_source(self, source: ExtractionSource) -> List[EnhancedGroundedDataField]:
+        """Get all fields extracted from a specific source."""
+        return [field for field in self.enhanced_grounded_fields 
+                if field.extraction_source == source]
+    
+    @property
+    def ocr_grounded_fields(self) -> List[EnhancedGroundedDataField]:
+        """Get all OCR grounded fields."""
+        return self.get_fields_by_source(ExtractionSource.OCR_GROUNDED)
+    
+    @property
+    def visual_only_fields(self) -> List[EnhancedGroundedDataField]:
+        """Get all visual-only fields."""
+        return self.get_fields_by_source(ExtractionSource.VISUAL_ONLY)
+    
+    @property
+    def failed_fields(self) -> List[EnhancedGroundedDataField]:
+        """Get all failed extraction fields."""
+        return self.get_fields_by_source(ExtractionSource.FAILED)
+
+
+# Legacy Models for Backward Compatibility
+
+@dataclass
+class GroundedDataField:
+    """Legacy grounded data field for backward compatibility."""
+    
+    field_name: str
+    value: Any
+    confidence: float
+    source_text_blocks: List[int]  # Indices of OCR text blocks that support this field
+    bounding_boxes: List[BoundingBox]  # Corresponding bounding boxes
+    
+    def __str__(self) -> str:
+        return f"GroundedDataField(field='{self.field_name}', value='{self.value}', confidence={self.confidence:.2f})"
+
+
+@dataclass
+class StructuredExtractionResult:
+    """Legacy result of structured data extraction with visual grounding."""
+    
+    extracted_data: Dict[str, Any]
+    grounded_fields: List[GroundedDataField]
+    json_schema: Dict[str, Any]
+    ocr_results: DocumentOCRResult
+    processing_time: float
+    llm_confidence: float
+    schema_validation_passed: bool
+    errors: List[str]
+    
+    def get_field_by_name(self, field_name: str) -> Optional[GroundedDataField]:
+        """Get grounded field by name."""
+        for field in self.grounded_fields:
+            if field.field_name == field_name:
+                return field
+        return None
+
+
+class StructuredExtractionResponse(BaseModel):
+    """Response model for structured data extraction API."""
+    
+    success: bool
+    extracted_data: dict
+    grounded_fields: List[dict]  # Serialized GroundedDataField objects
+    ocr_results: OCRResponse
+    processing_time: float
+    llm_confidence: float
+    schema_validation_passed: bool
+    errors: List[str]
+    error_message: Optional[str] = None
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "success": True,
+                "extracted_data": {
+                    "field_1": "VALUE-001",
+                    "field_2": "2024-08-06",
+                    "field_3": 1250.00,
+                    "items": [
+                        {"description": "Item A", "quantity": 2, "price": 500.00},
+                        {"description": "Item B", "quantity": 1, "price": 250.00}
+                    ]
+                },
+                "grounded_fields": [
+                    {
+                        "field_name": "field_1",
+                        "value": "VALUE-001",
+                        "confidence": 0.95,
+                        "source_text_blocks": [0, 1],
+                        "bounding_boxes": [
+                            {"x_min": 0.1, "y_min": 0.1, "x_max": 0.3, "y_max": 0.15}
+                        ]
+                    }
+                ],
+                "processing_time": 2.34,
+                "llm_confidence": 0.89,
+                "schema_validation_passed": True,
+                "errors": []
             }
         }

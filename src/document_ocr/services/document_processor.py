@@ -48,7 +48,7 @@ class DocumentOCRProcessor(DocumentProcessor):
         
         Args:
             image_data: Raw image bytes
-            **kwargs: Additional processing parameters like confidence_threshold
+            **kwargs: Additional processing parameters
             
         Returns:
             DocumentOCRResult containing extracted text and metadata
@@ -61,14 +61,5 @@ class DocumentOCRProcessor(DocumentProcessor):
         
         # Add original image info to result
         result.original_image_info = original_image_info
-        
-        # Apply confidence threshold filtering if specified
-        confidence_threshold = kwargs.get('confidence_threshold', 0.0)
-        if confidence_threshold > 0:
-            filtered_blocks = [
-                block for block in result.text_blocks 
-                if block.confidence >= confidence_threshold
-            ]
-            result.text_blocks = filtered_blocks
         
         return result

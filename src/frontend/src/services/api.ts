@@ -1,12 +1,34 @@
-import type { OCRRequest, OCRResponse, ApiError } from '@/types/api';
+import type { OCRRequest, OCRResponse } from '@/types/api';
 
 const API_BASE_URL = 'http://localhost:8000';
 
 export class ApiService {
   private static async handleResponse<T>(response: Response): Promise<T> {
     if (!response.ok) {
-      const error: ApiError = await response.json();
-      throw new Error(error.detail || 'API request failed');
+      let errorMessage = 'API request failed';
+      
+      try {
+        const errorData = await response.json();
+        
+        // Handle various error response formats
+        if (errorData.detail) {
+          errorMessage = errorData.detail;
+        } else if (errorData.error_message) {
+          errorMessage = errorData.error_message;
+        } else if (errorData.message) {
+          errorMessage = errorData.message;
+        } else if (errorData.errors && Array.isArray(errorData.errors) && errorData.errors.length > 0) {
+          errorMessage = errorData.errors[0];
+        } else {
+          // If none of the standard fields are present, stringify the whole error
+          errorMessage = JSON.stringify(errorData);
+        }
+      } catch (parseError) {
+        // If we can't parse the error response, use the status text
+        errorMessage = response.statusText || `HTTP ${response.status}`;
+      }
+      
+      throw new Error(errorMessage);
     }
     return response.json();
   }
@@ -28,6 +50,11 @@ export class ApiService {
     return this.handleResponse<OCRResponse>(response);
   }
 
+  // Alias for processOCR for backward compatibility
+  static async extractTextFromBase64(request: OCRRequest): Promise<OCRResponse> {
+    return this.processOCR(request.image_data, request.confidence_threshold);
+  }
+
   static async uploadFile(file: File, confidenceThreshold = 0.8): Promise<OCRResponse> {
     const formData = new FormData();
     formData.append('file', file);
@@ -41,7 +68,42 @@ export class ApiService {
     return this.handleResponse<OCRResponse>(response);
   }
 
-  static async checkHealth(): Promise<{ status: string; service: string; google_document_ai: string }> {
+  static async extractStructuredData(imageData: string, jsonSchema: any, userPrompt?: string): Promise<any> {
+    const request = {
+      image_data: imageData,
+      json_schema: jsonSchema,
+      user_prompt: userPrompt,
+    };
+
+    const response = await fetch(`${API_BASE_URL}/extract/structured`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    });
+
+    return this.handleResponse(response);
+  }
+
+  static async validateSchema(schema: any): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/schema/validate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(schema),
+    });
+
+    return this.handleResponse(response);
+  }
+
+  static async getSchemaTemplates(): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/schema/templates`);
+    return this.handleResponse(response);
+  }
+
+  static async checkHealth(): Promise<{ status: string; service: string; google_document_ai: string; azure_openai: string }> {
     const response = await fetch(`${API_BASE_URL}/health`);
     return this.handleResponse(response);
   }
