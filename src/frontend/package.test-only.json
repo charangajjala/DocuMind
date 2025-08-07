@@ -1,0 +1,22 @@
+{
+  "name": "schema-builder-test",
+  "scripts": {
+    "test": "jest --no-cache --watchAll=false"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.1.0",
+    "@testing-library/react": "^15.0.0", 
+    "@testing-library/user-event": "^14.5.0",
+    "@types/jest": "^29.5.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "setupFilesAfterEnv": ["./src/setupTests.ts"],
+    "testMatch": ["**/src/**/*.test.{ts,tsx}"],
+    "collectCoverageFrom": ["src/**/*.{ts,tsx}"],
+    "transformIgnorePatterns": ["node_modules/(?!(.*\\.mjs$|@testing-library))"],
+    "moduleFileExtensions": ["ts", "tsx", "js", "jsx", "json"]
+  }
+}

@@ -53,20 +53,25 @@ Instructions:
 2. Use BOTH visual analysis of the image AND OCR results for maximum accuracy
 3. Don't limit yourself to OCR-only data - extract visually readable information even if OCR missed it
 4. For fields where you can confirm the value exists in OCR text blocks, MANDATORY: reference those block IDs
-5. For fields extracted purely from visual analysis (not in OCR), indicate "visual_only" in source_block_ids
-6. Return data in valid JSON format that matches the schema
-7. If a field cannot be found clearly, use null for optional fields
-8. Be precise with data types (strings, numbers, dates, etc.)
+5. CRITICAL: For each field, find the SINGLE SMALLEST text element that contains the ENTIRE field value:
+   - For "John Smith", prefer one line block containing both words over separate token blocks
+   - For single words like "John", prefer the token block
+   - Always choose the most specific element that contains the complete field content
+   - If multiple blocks contain the same complete value, prefer the smallest one
+6. For fields extracted purely from visual analysis (not in OCR), indicate "visual_only" in source_block_ids
+7. Return data in valid JSON format that matches the schema
+8. If a field cannot be found clearly, use null for optional fields
+9. Be precise with data types (strings, numbers, dates, etc.)
 
 Please return a JSON object with this structure:
 {
     "extracted_data": { /* Data matching the target schema */ },
     "field_mappings": {
-        /* For each extracted field, provide the OCR block IDs that support it OR "visual_only" */
+        /* For each field, provide the SINGLE smallest text element that contains the complete field value */
         "field_name": {
             "value": "extracted_value",
             "confidence": 0.95,
-            "source_block_ids": [0, 1, 2] /* OR ["visual_only"] if not found in OCR */,
+            "source_block_ids": [12] /* SINGLE block ID - the smallest element containing the entire field value */,
             "reasoning": "Brief explanation of extraction source and confidence"
         }
     },
@@ -76,6 +81,10 @@ Please return a JSON object with this structure:
 Key Guidelines:
 - PRIMARY: Extract from visual analysis - don't be limited by OCR gaps
 - SECONDARY: When OCR confirms your visual findings, reference those block IDs
+- ONE BLOCK PER FIELD: Each field should map to exactly ONE text element that contains the complete value
+- SMALLEST CONTAINER: Choose the smallest element that fits the entire field content
+- COMPLETE COVERAGE: Ensure the selected block contains the full field value, not just part of it
+- HIERARCHY PREFERENCE: Token (for single words) > Line (for phrases) > Paragraph (for sentences) > Block (for large content)
 - Use "visual_only" for data you see visually but isn't in OCR results
 - Prioritize accuracy over OCR dependency
 - Provide confidence scores based on visual clarity and OCR confirmation
@@ -87,27 +96,11 @@ Key Guidelines:
         return base_prompt
 
 
-class DocumentTypePrompts:
-    """Generic prompts for document extraction."""
-    
-    @staticmethod
-    def get_generic_extraction_prompt() -> str:
-        """Get generic guidance for document extraction."""
-        return """Focus on extracting structured information according to the provided schema. Pay attention to:
-- Document structure and layout patterns
-- Field labels and their corresponding values  
-- Data types (numbers, dates, text, lists)
-- Tabular data and repeated structures
-- Hierarchical relationships between elements
-- Special formatting and visual cues"""
-
-
 class PromptManager:
     """Central manager for all prompt templates."""
     
     def __init__(self):
         self.extraction_prompts = StructuredExtractionPrompts()
-        self.document_type_prompts = DocumentTypePrompts()
     
     def get_extraction_prompts(
         self,
@@ -124,7 +117,7 @@ class PromptManager:
             full_text: Full OCR text
             ocr_text_blocks: OCR text blocks with metadata
             user_prompt: Additional user instructions
-            document_type: Optional document type for specialized prompts
+            document_type: Optional document type (ignored, kept for compatibility)
             
         Returns:
             Tuple of (system_prompt, user_prompt)
@@ -135,22 +128,7 @@ class PromptManager:
             ocr_text_blocks=ocr_text_blocks
         )
         
-        # Get base user prompt
-        base_user_prompt = self.extraction_prompts.get_user_prompt(user_prompt)
+        # Get user prompt (document_type is ignored)
+        user_prompt_text = self.extraction_prompts.get_user_prompt(user_prompt)
         
-        # Add document-type specific guidance if specified
-        if document_type:
-            type_specific_prompt = self._get_document_type_prompt(document_type)
-            if type_specific_prompt:
-                enhanced_user_prompt = f"{base_user_prompt}\n\nDocument Type Guidance:\n{type_specific_prompt}"
-            else:
-                enhanced_user_prompt = base_user_prompt
-        else:
-            enhanced_user_prompt = base_user_prompt
-        
-        return system_prompt, enhanced_user_prompt
-    
-    def _get_document_type_prompt(self, document_type: str) -> Optional[str]:
-        """Get document type specific prompt."""
-        # Return generic guidance for all document types
-        return self.document_type_prompts.get_generic_extraction_prompt()
+        return system_prompt, user_prompt_text

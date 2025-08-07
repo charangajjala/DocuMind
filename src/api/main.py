@@ -355,7 +355,9 @@ async def extract_structured_data(request: StructuredExtractionRequest):
             processing_time=result.processing_time,
             llm_confidence=result.llm_confidence,
             schema_validation_passed=result.schema_validation_passed,
-            errors=result.errors
+            prompts_used=result.prompts_used,
+            errors=result.errors,
+            raw_llm_response=result.raw_llm_response
         )
         
     except Exception as e:
