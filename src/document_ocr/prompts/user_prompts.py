@@ -28,24 +28,45 @@ def validate_extraction_response(response_data: Dict[str, Any]) -> ExtractionRes
     return ExtractionResponse.model_validate(response_data)
 
 
-def get_base_extraction_prompt(user_prompt: Optional[str] = None) -> str:
+def get_base_extraction_prompt(
+    user_prompt: Optional[str] = None,
+    json_schema: Optional[Dict[str, Any]] = None,
+) -> str:
     """Generate base user prompt for extraction with visual-first approach.
-    
+
     Args:
         user_prompt: Additional user instructions
-        
+        json_schema: If provided, indicates schema-guided extraction; otherwise prompt-only
+
     Returns:
         User prompt string
     """
     # Get the JSON schema for the response format
     response_schema = ExtractionResponse.model_json_schema()
-    
+
+    # Header describing context depending on schema availability
+    if json_schema:
+      context_header = (
+        "CRITICAL: You are working with TWO DIFFERENT SCHEMAS:\n\n"
+        "1. DATA EXTRACTION SCHEMA → Defines WHAT data to extract (provided in your system context)\n"
+        "2. RESPONSE FORMAT SCHEMA → Defines HOW to structure your JSON response (shown below)\n"
+      )
+      extraction_requirement = (
+        "• Extract data according to the DATA EXTRACTION SCHEMA (from system context)\n"
+      )
+    else:
+      context_header = (
+        "CRITICAL: You are working with ONE SCHEMA here:\n\n"
+        "1. RESPONSE FORMAT SCHEMA → Defines HOW to structure your JSON response (shown below)\n\n"
+        "No DATA EXTRACTION SCHEMA is provided. Infer WHAT to extract purely from the user instructions and the document itself."
+      )
+      extraction_requirement = (
+        "• No DATA EXTRACTION SCHEMA provided. Use the user instructions and document content to decide WHAT to extract.\n"
+      )
+
     base_prompt = f"""Extract structured data from this document image using the following approach:
 
-CRITICAL: You are working with TWO DIFFERENT SCHEMAS:
-
-1. DATA EXTRACTION SCHEMA → Defines WHAT data to extract (provided in your system context)
-2. RESPONSE FORMAT SCHEMA → Defines HOW to structure your JSON response (shown below)
+{context_header}
 
 EXTRACTION STRATEGY:
 • Use BOTH visual analysis AND OCR results for maximum accuracy
@@ -54,15 +75,16 @@ EXTRACTION STRATEGY:
 • For purely visual extractions, use "visual_only" in source_block_id
 
 RESPONSE REQUIREMENTS:
-• Extract data according to the DATA EXTRACTION SCHEMA (from system context)
-• Format response using this RESPONSE FORMAT SCHEMA:
+{extraction_requirement}• Format response using this RESPONSE FORMAT SCHEMA:
 
 {response_schema}
 
 FIELD MAPPING RULES:
-• CRITICAL: Each field must map to exactly ONE source block - the most specific OCR text block that contains the complete field value
-• Find the smallest/most precise text block that fully contains your extracted value
-• OCR grounded: Use single OCR text block ID  
+• Map each field to the MOST SPECIFIC OCR text block(s) that contain the complete value.
+  - If one block contains the complete value → use a single integer block id in source_block_id
+  - If multiple smallest blocks together contain the value (e.g., multi-line) → use a list of integer block ids in source_block_id
+  - If no OCR block(s) contain the full value → use "visual_only"
+• Always prefer the smallest block level(s) that fully contain the value (Token/Line/Paragraph/Block)
 • Visual only: Use "visual_only"
 • Missing/unclear: Use null for optional fields
 • Maintain precise data types (strings, numbers, dates)
@@ -74,7 +96,7 @@ The OCR blocks follow a hierarchy from smallest to largest:
 3. Paragraph - Multiple lines forming coherent text blocks
 4. Block - Largest region containing multiple paragraphs (LEAST SPECIFIC)
 
-• Always select the SMALLEST block level that contains the COMPLETE field value
+• Always select the SMALLEST block level that contains the COMPLETE field value. If no blocks contains then value, use "visual_only"
 • Single word → Token block
 • Multiple words on same line → Line block  
 • Multiple lines → Paragraph block
@@ -110,7 +132,7 @@ For each field extraction, provide comprehensive reasoning that explains:
    - Ambiguity or alternative interpretations
    - Supporting context or validation clues
 """
-    
+
     if user_prompt:
         return f"""{base_prompt}
 
@@ -118,8 +140,22 @@ IMPORTANT USER INSTRUCTIONS:
 {user_prompt}
 
 Follow these user instructions carefully as they provide critical guidance for this specific document extraction task."""
-    
-    return base_prompt
+
+    # Add strict mapping key format requirements for nested fields
+    mapping_naming_rules = """
+
+FIELD NAMING FOR MAPPINGS (STRICT):
+• Keys in field_mappings MUST use fully-qualified paths:
+  - Nested objects: parent.child.grandchild (dot notation)
+  - Arrays of objects: items[0].name, items[1].price (use zero-based bracket indices)
+• Use exact same paths for extracted_data keys where possible, so each mapping key corresponds 1:1 to an extracted value
+• Example:
+  extracted_data.customer.name → field_mappings["customer.name"]
+  extracted_data.items[0].amount → field_mappings["items[0].amount"]
+• If a top-level field is a scalar, use just the field name (e.g., "invoice_number")
+"""
+
+    return f"{base_prompt}{mapping_naming_rules}"
 
 
 def get_visual_only_prompt(user_prompt: Optional[str] = None) -> str:

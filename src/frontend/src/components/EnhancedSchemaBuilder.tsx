@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -36,15 +36,40 @@ interface SchemaBuilderProps {
   initialSchema?: any;
 }
 
+// Removed persistent storage key and persistence
+
 export const EnhancedSchemaBuilder: React.FC<SchemaBuilderProps> = ({ 
-  onSchemaChange
+  onSchemaChange,
+  initialSchema
 }) => {
   const [fields, setFields] = useState<ComplexField[]>([]);
+
+  // Load initial schema (if provided) on mount/prop change
+  useEffect(() => {
+    try {
+      if (initialSchema && initialSchema.properties) {
+        const fieldsFromSchema = convertSchemaToFields(initialSchema);
+        setFields(fieldsFromSchema);
+        if (onSchemaChange) {
+          const schema = generateJsonSchemaFromFields(fieldsFromSchema);
+          onSchemaChange(schema);
+        }
+      } else {
+        setFields([]);
+        if (onSchemaChange) {
+          onSchemaChange(generateJsonSchemaFromFields([]));
+        }
+      }
+    } catch (error) {
+      console.error('Error initializing schema:', error);
+      setFields([]);
+    }
+  }, [onSchemaChange, initialSchema]);
 
   // Generate unique ID
   const generateId = () => Math.random().toString(36).substr(2, 9);
 
-  // Update fields and notify parent
+  // Update fields and notify parent (no persistence)
   const updateFields = useCallback((newFields: ComplexField[]) => {
     setFields(newFields);
     if (onSchemaChange) {
@@ -505,7 +530,65 @@ export const EnhancedSchemaBuilder: React.FC<SchemaBuilderProps> = ({
 
   // Clear all fields
   const clearSchema = () => {
-    updateFields([]);
+    if (fields.length > 0) {
+      const confirmed = window.confirm('Are you sure you want to clear all fields? This action cannot be undone.');
+      if (confirmed) {
+        updateFields([]);
+      }
+    }
+  };
+
+  // Convert JSON schema to fields format (for initial schema)
+  const convertSchemaToFields = (schema: any): ComplexField[] => {
+    const fields: ComplexField[] = [];
+    
+    if (schema.properties) {
+      Object.entries(schema.properties).forEach(([name, prop]: [string, any]) => {
+        const field: ComplexField = {
+          id: generateId(),
+          name,
+          type: prop.type || 'string',
+          required: schema.required?.includes(name) || false,
+          description: prop.description || ''
+        };
+
+        // Handle validation rules
+        if (prop.minLength !== undefined) field.minLength = prop.minLength;
+        if (prop.maxLength !== undefined) field.maxLength = prop.maxLength;
+        if (prop.pattern) field.pattern = prop.pattern;
+        if (prop.minimum !== undefined) field.minimum = prop.minimum;
+        if (prop.maximum !== undefined) field.maximum = prop.maximum;
+
+        // Handle nested objects
+        if (prop.type === 'object' && prop.properties) {
+          field.properties = {};
+          Object.entries(prop.properties).forEach(([nestedName, nestedProp]: [string, any]) => {
+            field.properties![nestedName] = {
+              id: generateId(),
+              name: nestedName,
+              type: nestedProp.type || 'string',
+              required: prop.required?.includes(nestedName) || false,
+              description: nestedProp.description || ''
+            };
+          });
+        }
+
+        // Handle arrays
+        if (prop.type === 'array' && prop.items) {
+          field.items = {
+            id: generateId(),
+            name: 'item',
+            type: prop.items.type || 'string',
+            required: false,
+            description: prop.items.description || ''
+          };
+        }
+
+        fields.push(field);
+      });
+    }
+
+    return fields;
   };
 
   return (
@@ -516,6 +599,7 @@ export const EnhancedSchemaBuilder: React.FC<SchemaBuilderProps> = ({
         <p className="text-lg font-medium text-gray-400 max-w-2xl mx-auto">
           Create sophisticated JSON schemas with validation rules and complex data structures
         </p>
+        {/* Removed loadedFromStorage and isAutoSaving badges */}
       </div>
 
       {/* Main Content */}

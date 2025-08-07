@@ -44,7 +44,17 @@ export function ImprovedOCRApp() {
   const [hoveredField, setHoveredField] = useState<string | null>(null);
   const [hoveredTextBlock, setHoveredTextBlock] = useState<number | null>(null);
   const [userPrompt, setUserPrompt] = useState<string>('');
-  const [fullPromptsUsed, setFullPromptsUsed] = useState<{system_prompt?: string, user_prompt?: string} | null>(null);
+  const [fullPromptsUsed, setFullPromptsUsed] = useState<{
+    system_prompt?: string;
+    user_prompt?: string;
+    token_estimates?: {
+      system_prompt_tokens: number;
+      user_prompt_tokens: number;
+      image_input_tokens: number;
+      total_estimated_input_tokens: number;
+    };
+    subset_block_count?: number;
+  } | null>(null);
   const [rawLlmResponse, setRawLlmResponse] = useState<string | null>(null);
 
   // Computed states
@@ -58,6 +68,7 @@ export function ImprovedOCRApp() {
     setStructuredResults(null);
     setFullPromptsUsed(null);
     setRawLlmResponse(null);
+    setSchema(null); // Reset schema for a fresh run on new image
     setActiveTab('upload');
 
     const reader = new FileReader();
@@ -309,7 +320,7 @@ export function ImprovedOCRApp() {
                   className="data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 h-10"
                 >
                   <Sparkles className="h-4 w-4 mr-2" />
-                  AI Prompts
+                  LLM Debug
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -522,7 +533,7 @@ export function ImprovedOCRApp() {
             <TabsContent value="results" className="space-y-4">
               {hasStructuredResults && (
                 <div className="w-full overflow-hidden">
-                  <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 min-h-0">
+                  <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 min-h-0">
                     {/* Visual Field Mapping - Takes 3/4 of width (75%) */}
                     <div className="lg:col-span-3 min-w-0">
                       <Card className="border shadow-sm">
@@ -532,7 +543,7 @@ export function ImprovedOCRApp() {
                             <h3 className="text-base font-medium">Visual Field Mapping</h3>
                           </div>
                           <div className="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-3">
-                            <div className="w-full h-[500px] rounded-md overflow-hidden bg-white dark:bg-slate-900">
+                            <div className="w-full h-[70vh] min-h-[480px] rounded-md overflow-hidden bg-white dark:bg-slate-900">
                               <ImageWithBoundingBoxes
                                 imageSrc={imageBase64}
                                 groundedFields={structuredResults.grounded_fields || []}
@@ -547,14 +558,16 @@ export function ImprovedOCRApp() {
                       </Card>
                     </div>
 
-                    {/* Extracted Fields Display - Takes 1/4 of width (25%) - COMPACT */}
-                    <div className="lg:col-span-1 min-w-0">
+                    {/* Extracted Fields Display - Wider column to avoid overflow */}
+                    <div className="lg:col-span-2 min-w-0">
                       <div className="sticky top-4">
-                        <div className="space-y-2">
+                        <div className="space-y-2 pr-2">
                           <ExtractedFieldsDisplay
                             structuredResults={structuredResults}
                             onFieldHover={setHoveredField}
                             hoveredField={hoveredField}
+                            imageWidth={ocrResults?.image_dimensions?.width}
+                            imageHeight={ocrResults?.image_dimensions?.height}
                           />
                         </div>
                       </div>
@@ -564,17 +577,17 @@ export function ImprovedOCRApp() {
               )}
             </TabsContent>
 
-            {/* AI Prompts Tab */}
+            {/* LLM Debug Tab */}
             <TabsContent value="prompts" className="space-y-4">
               {fullPromptsUsed && (
                 <div className="w-full max-w-6xl mx-auto space-y-6">
                   <div className="text-center mb-6">
                     <h2 className="text-2xl font-bold mb-2 flex items-center justify-center gap-2">
                       <Sparkles className="h-6 w-6 text-purple-600" />
-                      AI Prompts Used
+                      LLM Debug
                     </h2>
                     <p className="text-muted-foreground">
-                      Complete prompts sent to the AI model for structured data extraction
+                      Complete prompts and token/block statistics used by the LLM
                     </p>
                   </div>
 
@@ -660,39 +673,68 @@ export function ImprovedOCRApp() {
                     </Card>
                   )}
 
-                  {/* Prompt Statistics */}
+                  {/* LLM Token and Block Statistics */}
                   <Card className="border shadow-sm">
                     <CardHeader className="pb-3">
                       <CardTitle className="text-lg flex items-center gap-2">
                         <Zap className="h-5 w-5 text-green-600" />
-                        Prompt Statistics
+                        Token & Block Statistics
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                         <div className="text-center p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                           <div className="text-2xl font-bold text-blue-600">
-                            {fullPromptsUsed.system_prompt ? fullPromptsUsed.system_prompt.length : 0}
+                            {fullPromptsUsed.token_estimates?.system_prompt_tokens ?? Math.floor((fullPromptsUsed.system_prompt?.length || 0)/4)}
                           </div>
-                          <div className="text-sm text-muted-foreground">System Prompt Characters</div>
+                          <div className="text-sm text-muted-foreground">System Prompt Tokens (est.)</div>
                         </div>
                         <div className="text-center p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
                           <div className="text-2xl font-bold text-purple-600">
-                            {fullPromptsUsed.user_prompt ? fullPromptsUsed.user_prompt.length : 0}
+                            {fullPromptsUsed.token_estimates?.user_prompt_tokens ?? Math.floor((fullPromptsUsed.user_prompt?.length || 0)/4)}
                           </div>
-                          <div className="text-sm text-muted-foreground">User Prompt Characters</div>
+                          <div className="text-sm text-muted-foreground">User Prompt Tokens (est.)</div>
                         </div>
                         <div className="text-center p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
                           <div className="text-2xl font-bold text-green-600">
-                            {rawLlmResponse ? rawLlmResponse.length : 0}
+                            {fullPromptsUsed.token_estimates?.image_input_tokens ?? 0}
                           </div>
-                          <div className="text-sm text-muted-foreground">LLM Response Characters</div>
+                          <div className="text-sm text-muted-foreground">Image Input Tokens (est.)</div>
                         </div>
                         <div className="text-center p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
                           <div className="text-2xl font-bold text-orange-600">
-                            {(fullPromptsUsed.system_prompt?.length || 0) + (fullPromptsUsed.user_prompt?.length || 0) + (rawLlmResponse?.length || 0)}
+                            {fullPromptsUsed.token_estimates?.total_estimated_input_tokens ?? (
+                              Math.floor((fullPromptsUsed.system_prompt?.length || 0)/4) + Math.floor((fullPromptsUsed.user_prompt?.length || 0)/4)
+                            )}
                           </div>
-                          <div className="text-sm text-muted-foreground">Total Characters</div>
+                          <div className="text-sm text-muted-foreground">Total Estimated Input Tokens</div>
+                        </div>
+                      </div>
+                      {/* Block optimization stats */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                        <div className="text-center p-4 bg-slate-50 dark:bg-slate-900/20 rounded-lg">
+                          <div className="text-2xl font-bold text-slate-700">
+                            {ocrResults?.text_blocks?.length ?? 0}
+                          </div>
+                          <div className="text-sm text-muted-foreground">Original OCR Blocks</div>
+                        </div>
+                        <div className="text-center p-4 bg-slate-50 dark:bg-slate-900/20 rounded-lg">
+                          <div className="text-2xl font-bold text-slate-700">
+                            {structuredResults?.prompts_used?.subset_block_count ?? '—'}
+                          </div>
+                          <div className="text-sm text-muted-foreground">Optimized Subset Blocks</div>
+                        </div>
+                        <div className="text-center p-4 bg-slate-50 dark:bg-slate-900/20 rounded-lg">
+                          <div className="text-2xl font-bold text-slate-700">
+                            {(() => {
+                              const orig = ocrResults?.text_blocks?.length ?? 0;
+                              const sub = structuredResults?.prompts_used?.subset_block_count as number | undefined;
+                              if (!orig || !sub && sub !== 0) return '—';
+                              const pct = Math.max(0, Math.min(100, Math.round((1 - sub / orig) * 100)));
+                              return `${pct}%`;
+                            })()}
+                          </div>
+                          <div className="text-sm text-muted-foreground">Block Reduction</div>
                         </div>
                       </div>
                     </CardContent>

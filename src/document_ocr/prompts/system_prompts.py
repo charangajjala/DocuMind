@@ -57,6 +57,11 @@ For each extracted field, you must specify the MOST SPECIFIC (smallest) OCR bloc
 
 CRITICAL: Always choose the SMALLEST block level that can contain the ENTIRE field value. This provides the most precise bounding boxes for visual grounding.
 
+FIELD MAPPING RULES (BLOCK IDS):
+• Use a SINGLE integer block id in source_block_id when one OCR block fully contains the value
+• If and only if the value truly spans multiple smallest OCR blocks (e.g., wraps across lines) → use a LIST of integer block ids in source_block_id covering the entire value
+• If no OCR block(s) fully contain the value → use "visual_only" in source_block_id
+
 WORKING PRINCIPLES:
 • Precision over speed - accuracy is paramount
 • Multi-source validation - combine visual and OCR evidence
