@@ -20,7 +20,7 @@ import {
 
 interface StructuredExtractionProps {
   imageData: string; // base64 encoded image
-  schema: any;
+  schema?: any; // Optional schema
   onExtractionComplete: (result: any) => void;
 }
 
@@ -32,6 +32,10 @@ interface ExtractionResult {
     value: any;
     confidence: number;
     source_text_blocks: number[];
+    reasoning?: string;
+    extraction_source?: string;
+    ocr_text_found?: string;
+    visual_description?: string;
     bounding_boxes: Array<{
       x_min: number;
       y_min: number;
@@ -45,6 +49,7 @@ interface ExtractionResult {
   schema_validation_passed: boolean;
   errors: string[];
   error_message?: string;
+  raw_llm_response?: string; // Raw response from LLM before post-processing
 }
 
 export function StructuredExtraction({ 
@@ -58,7 +63,24 @@ export function StructuredExtraction({
   const [selectedField, setSelectedField] = useState<string | null>(null);
 
   const extractStructuredData = useCallback(async () => {
-    if (!imageData || !schema) return;
+    // Validate that at least one of schema or prompt is provided
+    if (!schema && !userPrompt.trim()) {
+      const errorResult: ExtractionResult = {
+        success: false,
+        extracted_data: {},
+        grounded_fields: [],
+        ocr_results: null,
+        processing_time: 0,
+        llm_confidence: 0,
+        schema_validation_passed: false,
+        errors: ['Either a JSON schema or user prompt must be provided'],
+        error_message: 'Either a JSON schema or user prompt must be provided'
+      };
+      setResult(errorResult);
+      return;
+    }
+
+    if (!imageData) return;
 
     setIsExtracting(true);
     setResult(null);
@@ -235,12 +257,18 @@ export function StructuredExtraction({
               placeholder="e.g., Focus on the top section of the document, ignore handwritten notes..."
               rows={3}
             />
+            <p className="text-sm text-muted-foreground mt-2">
+              {schema 
+                ? "You can provide additional instructions to guide the extraction process."
+                : "Provide detailed instructions for what data to extract from the document. This is required when no schema is provided."
+              }
+            </p>
           </div>
 
           <div className="flex items-center space-x-4">
             <Button
               onClick={extractStructuredData}
-              disabled={isExtracting || !imageData || !schema}
+              disabled={isExtracting || !imageData || (!schema && !userPrompt.trim())}
               className="flex items-center space-x-2"
             >
               {isExtracting ? (
@@ -255,6 +283,12 @@ export function StructuredExtraction({
                 </>
               )}
             </Button>
+
+            {!schema && !userPrompt.trim() && (
+              <p className="text-sm text-amber-600">
+                Either a JSON schema or user prompt is required
+              </p>
+            )}
 
             {result && (
               <Button
@@ -391,6 +425,31 @@ export function StructuredExtraction({
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Raw LLM Response Section */}
+            {result.raw_llm_response && (
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-medium">Raw LLM Response</h4>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigator.clipboard.writeText(result.raw_llm_response || '')}
+                    className="text-xs"
+                  >
+                    Copy Response
+                  </Button>
+                </div>
+                <div className="bg-gray-50 border rounded-lg p-3 max-h-96 overflow-auto">
+                  <pre className="text-xs text-gray-700 whitespace-pre-wrap font-mono">
+                    {result.raw_llm_response}
+                  </pre>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  This is the exact response received from the LLM before any post-processing by the backend.
+                </p>
               </div>
             )}
           </CardContent>

@@ -6,33 +6,28 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { TooltipProvider } from '@/components/ui/tooltip';
-import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { ApiService } from '@/services/api';
 import { ImageWithBoundingBoxes } from '@/components/ImageWithBoundingBoxes';
 import { ExtractedFieldsDisplay } from '@/components/ExtractedFieldsDisplay';
 import { OCRVisualization } from '@/components/OCRVisualization';
+import { EnhancedSchemaBuilder } from '@/components/EnhancedSchemaBuilder';
 import type { OCRResponse } from '@/types/api';
 import { 
   Loader2, 
   FileText, 
-  Eye, 
   AlertCircle, 
-  CheckCircle2,
   Brain,
   Settings,
   Sparkles,
   Upload,
   Image as ImageIcon,
-  Clock,
   Zap,
-  Target,
   ChevronRight,
-  Plus,
-  Trash2,
-  Layout
+  Layout,
+  MessageSquare
 } from 'lucide-react';
 
 export function ImprovedOCRApp() {
@@ -43,11 +38,14 @@ export function ImprovedOCRApp() {
   const [error, setError] = useState<string>('');
   const [activeTab, setActiveTab] = useState<string>('upload');
   const [structuredResults, setStructuredResults] = useState<any>(null);
-  const [schema, setSchema] = useState<Array<{id: string, name: string, description: string, type: string}>>([]);
+  const [schema, setSchema] = useState<any>(null);
   const [isExtractingData, setIsExtractingData] = useState(false);
   const [azureConfigStatus, setAzureConfigStatus] = useState<'checking' | 'configured' | 'not-configured'>('checking');
   const [hoveredField, setHoveredField] = useState<string | null>(null);
   const [hoveredTextBlock, setHoveredTextBlock] = useState<number | null>(null);
+  const [userPrompt, setUserPrompt] = useState<string>('');
+  const [fullPromptsUsed, setFullPromptsUsed] = useState<{system_prompt?: string, user_prompt?: string} | null>(null);
+  const [rawLlmResponse, setRawLlmResponse] = useState<string | null>(null);
 
   // Computed states
   const hasOCRResults = ocrResults !== null;
@@ -58,6 +56,8 @@ export function ImprovedOCRApp() {
     setError('');
     setOcrResults(null);
     setStructuredResults(null);
+    setFullPromptsUsed(null);
+    setRawLlmResponse(null);
     setActiveTab('upload');
 
     const reader = new FileReader();
@@ -79,73 +79,91 @@ export function ImprovedOCRApp() {
 
     try {
       const base64Data = imageBase64.split(',')[1];
+      console.log('🔄 OCR Request:', {
+        fileSize: selectedFile.size,
+        fileName: selectedFile.name,
+        fileType: selectedFile.type,
+        base64DataLength: base64Data.length,
+        timestamp: new Date().toISOString()
+      });
+      
       const response = await ApiService.processOCR(base64Data);
+      
+      console.log('✅ OCR Response from backend:', response);
       
       setOcrResults(response);
       setActiveTab('ocr-results');
     } catch (error) {
-      console.error('OCR Error:', error);
+      console.error('❌ OCR Error:', {
+        error,
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        fileName: selectedFile?.name,
+        fileSize: selectedFile?.size,
+        timestamp: new Date().toISOString()
+      });
       setError(error instanceof Error ? error.message : 'Failed to process document. Please try again.');
     } finally {
       setIsProcessing(false);
     }
   }, [selectedFile, imageBase64]);
 
-  const getQualityGrade = (score: number) => {
-    if (score >= 0.8) return { grade: 'Excellent', color: 'text-green-600' };
-    if (score >= 0.6) return { grade: 'Good', color: 'text-yellow-600' };
-    return { grade: 'Poor', color: 'text-red-600' };
-  };
-
-  const addSchemaField = () => {
-    const newField = {
-      id: `field-${Date.now()}`,
-      name: '',
-      description: '',
-      type: 'text'
-    };
-    setSchema([...schema, newField]);
-  };
-
-  const removeSchemaField = (id: string) => {
-    setSchema(schema.filter(field => field.id !== id));
-  };
-
-  const updateSchemaField = (id: string, updates: Partial<{name: string, description: string, type: string}>) => {
-    setSchema(schema.map(field => 
-      field.id === id ? { ...field, ...updates } : field
-    ));
-  };
-
   const processStructuredExtraction = async () => {
-    if (!ocrResults || schema.length === 0) return;
+    // Validation: Need OCR results and either schema or user prompt
+    if (!ocrResults) return;
+    
+    const hasSchema = schema && schema.properties && Object.keys(schema.properties).length > 0;
+    const hasUserPrompt = userPrompt.trim().length > 0;
+    
+    if (!hasSchema && !hasUserPrompt) {
+      setError('Please provide either a schema definition or custom instructions for data extraction.');
+      return;
+    }
     
     setIsExtractingData(true);
     setError('');
+    setFullPromptsUsed(null);
+    setRawLlmResponse(null);
     
     try {
-      const jsonSchema = {
-        type: "object",
-        properties: schema.reduce((acc, field) => {
-          acc[field.name] = {
-            type: field.type === 'number' ? 'number' : 
-                  field.type === 'boolean' ? 'boolean' : 'string',
-            description: field.description || `Extract ${field.name} from the document`
-          };
-          return acc;
-        }, {} as Record<string, any>),
-        required: schema.filter(field => field.name).map(field => field.name)
-      };
+      const hasSchema = schema && schema.properties && Object.keys(schema.properties).length > 0;
+      const jsonSchema = hasSchema ? schema : null; // Schema is optional
       
-      const userPrompt = `Please extract the following information from the document: ${schema.map(field => `${field.name} (${field.type}): ${field.description || 'No description provided'}`).join(', ')}`;
+      const prompt = userPrompt.trim() || "Extract the structured data from the document.";
       const base64Data = imageBase64.split(',')[1];
       
-      const response = await ApiService.extractStructuredData(base64Data, jsonSchema, userPrompt);
+      console.log('🔄 Structured Extraction Request:', {
+        schema: jsonSchema,
+        prompt: prompt,
+        base64DataLength: base64Data.length,
+        userPromptProvided: !!userPrompt.trim(),
+        hasSchema: hasSchema,
+        timestamp: new Date().toISOString()
+      });
+      
+      const response = await ApiService.extractStructuredData(base64Data, jsonSchema, prompt);
+      
+      console.log('✅ Structured Extraction Response from backend:', response);
+      
+      // Save the full prompts that were actually used by the backend
+      if (response.prompts_used) {
+        setFullPromptsUsed(response.prompts_used);
+      }
+      
+      // Save the raw LLM response for debugging
+      if (response.raw_llm_response) {
+        setRawLlmResponse(response.raw_llm_response);
+      }
       
       setStructuredResults(response);
       setActiveTab('results');
     } catch (error) {
-      console.error('Structured extraction error:', error);
+      console.error('❌ Structured extraction error:', {
+        error,
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        schemaFieldsCount: schema?.properties ? Object.keys(schema.properties).length : 0,
+        userPromptProvided: !!userPrompt.trim(),
+        timestamp: new Date().toISOString()
+      });
       
       let errorMessage = 'Failed to extract structured data. Please try again.';
       let errorString = '';
@@ -183,14 +201,25 @@ export function ImprovedOCRApp() {
   const checkAzureConfig = async () => {
     setAzureConfigStatus('checking');
     try {
+      console.log('🔄 Health Check Request:', {
+        timestamp: new Date().toISOString()
+      });
+      
       const healthCheck = await ApiService.checkHealth();
+      
+      console.log('✅ Health Check Response from backend:', healthCheck);
+      
       if (healthCheck.azure_openai === 'configured') {
         setAzureConfigStatus('configured');
       } else {
         setAzureConfigStatus('not-configured');
       }
     } catch (error) {
-      console.log('Health check failed:', error);
+      console.log('❌ Health check failed:', {
+        error,
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date().toISOString()
+      });
       setAzureConfigStatus('not-configured');
     }
   };
@@ -238,11 +267,11 @@ export function ImprovedOCRApp() {
         </div>
 
         {/* Main Content */}
-        <div className="container mx-auto px-6 py-6">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <div className="container mx-auto px-4 py-4 max-w-full">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 h-full">
             {/* Tab Navigation */}
             <div className="flex justify-center">
-              <TabsList className="grid w-full max-w-3xl grid-cols-4 h-12 bg-muted/50 p-1">
+              <TabsList className="grid w-full max-w-4xl grid-cols-5 h-12 bg-muted/50 p-1">
                 <TabsTrigger 
                   value="upload" 
                   className="data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 h-10"
@@ -273,6 +302,14 @@ export function ImprovedOCRApp() {
                 >
                   <Brain className="h-4 w-4 mr-2" />
                   View Results
+                </TabsTrigger>
+                <TabsTrigger 
+                  value="prompts" 
+                  disabled={!fullPromptsUsed}
+                  className="data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 h-10"
+                >
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  AI Prompts
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -366,89 +403,32 @@ export function ImprovedOCRApp() {
             </TabsContent>
 
             {/* OCR Results Tab */}
-            <TabsContent value="ocr-results" className="space-y-6">
-              <div className="max-w-7xl mx-auto">
+            <TabsContent value="ocr-results" className="space-y-4 h-full">
+              <div className="h-full flex flex-col">
                 {hasOCRResults && (
                   <>
-                    {/* OCR Summary Stats */}
-                    <Card className="border-0 shadow-lg">
-                      <CardHeader>
-                        <CardTitle className="flex items-center justify-center space-x-2 text-lg">
-                          <CheckCircle2 className="h-5 w-5 text-green-600" />
-                          <span>OCR Processing Complete</span>
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                          <div className="flex items-center justify-center space-x-3">
-                            <div className="p-2 bg-green-100 dark:bg-green-900/20 rounded-lg">
-                              <Clock className="h-5 w-5 text-green-600" />
-                            </div>
-                            <div className="text-center">
-                              <p className="text-sm text-muted-foreground">Processing Time</p>
-                              <p className="font-semibold">{ocrResults.processing_time?.toFixed(1)}s</p>
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center justify-center space-x-3">
-                            <div className="p-2 bg-blue-100 dark:bg-blue-900/20 rounded-lg">
-                              <FileText className="h-5 w-5 text-blue-600" />
-                            </div>
-                            <div className="text-center">
-                              <p className="text-sm text-muted-foreground">Text Blocks</p>
-                              <p className="font-semibold">{ocrResults.text_blocks?.length || 0}</p>
-                            </div>
-                          </div>
-
-                          {ocrResults.image_quality && (
-                            <>
-                              <div className="flex items-center justify-center space-x-3">
-                                <div className="p-2 bg-purple-100 dark:bg-purple-900/20 rounded-lg">
-                                  <Eye className="h-5 w-5 text-purple-600" />
-                                </div>
-                                <div className="text-center">
-                                  <p className="text-sm text-muted-foreground">Image Quality</p>
-                                  <p className={`font-semibold ${getQualityGrade(ocrResults.image_quality.quality_score).color}`}>
-                                    {getQualityGrade(ocrResults.image_quality.quality_score).grade}
-                                  </p>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center justify-center space-x-3">
-                                <div className="p-2 bg-orange-100 dark:bg-orange-900/20 rounded-lg">
-                                  <Target className="h-5 w-5 text-orange-600" />
-                                </div>
-                                <div className="text-center">
-                                  <p className="text-sm text-muted-foreground">Confidence</p>
-                                  <p className="font-semibold">{(ocrResults.image_quality.quality_score * 100).toFixed(0)}%</p>
-                                </div>
-                              </div>
-                            </>
-                          )}
-                        </div>
-
-                        <div className="mt-6 flex justify-center">
-                          <Button 
-                            onClick={() => setActiveTab('extraction')}
-                            className="px-8 h-12"
-                            size="lg"
-                          >
-                            <ChevronRight className="h-5 w-5 mr-2" />
-                            Continue to Schema Definition
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
+                    <div className="flex justify-center mb-4">
+                      <Button 
+                        onClick={() => setActiveTab('extraction')}
+                        className="px-6 h-10"
+                        size="default"
+                      >
+                        <ChevronRight className="h-4 w-4 mr-2" />
+                        Continue to Schema Definition
+                      </Button>
+                    </div>
 
                     {/* OCR Visualization */}
-                    <OCRVisualization
-                      imageSrc={imageBase64}
-                      textBlocks={ocrResults.text_blocks || []}
-                      imageWidth={ocrResults.image_dimensions?.width}
-                      imageHeight={ocrResults.image_dimensions?.height}
-                      onTextBlockHover={setHoveredTextBlock}
-                      hoveredBlock={hoveredTextBlock}
-                    />
+                    <div className="flex-1 min-h-0">
+                      <OCRVisualization
+                        imageSrc={imageBase64}
+                        textBlocks={ocrResults.text_blocks || []}
+                        imageWidth={ocrResults.image_dimensions?.width}
+                        imageHeight={ocrResults.image_dimensions?.height}
+                        onTextBlockHover={setHoveredTextBlock}
+                        hoveredBlock={hoveredTextBlock}
+                      />
+                    </div>
                   </>
                 )}
               </div>
@@ -456,149 +436,277 @@ export function ImprovedOCRApp() {
 
             {/* Schema Definition Tab */}
             <TabsContent value="extraction" className="space-y-6">
-              <div className="max-w-4xl mx-auto">
-                <Card className="border-0 shadow-lg">
-                  <CardHeader>
-                    <CardTitle className="flex items-center justify-center space-x-2 text-lg">
-                      <Settings className="h-5 w-5 text-purple-600" />
-                      <span>Define Data Schema</span>
-                    </CardTitle>
-                    <CardDescription className="text-center">
-                      Define the fields you want to extract from your document
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-4">
-                      {schema.map((field) => (
-                        <div key={field.id} className="p-4 bg-muted/50 rounded-lg space-y-3">
-                          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                            <div>
-                              <Label htmlFor={`name-${field.id}`}>Field Name</Label>
-                              <Input
-                                id={`name-${field.id}`}
-                                placeholder="e.g., customer_name"
-                                value={field.name}
-                                onChange={(e) => updateSchemaField(field.id, { name: e.target.value })}
-                              />
-                            </div>
-                            <div>
-                              <Label htmlFor={`type-${field.id}`}>Data Type</Label>
-                              <Select 
-                                value={field.type} 
-                                onValueChange={(value) => updateSchemaField(field.id, { type: value })}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="text">Text</SelectItem>
-                                  <SelectItem value="number">Number</SelectItem>
-                                  <SelectItem value="boolean">Boolean</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="md:col-span-2 flex space-x-2">
-                              <div className="flex-1">
-                                <Label htmlFor={`desc-${field.id}`}>Description</Label>
-                                <Input
-                                  id={`desc-${field.id}`}
-                                  placeholder="Describe what to extract..."
-                                  value={field.description}
-                                  onChange={(e) => updateSchemaField(field.id, { description: e.target.value })}
-                                />
-                              </div>
-                              <div className="flex items-end">
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  onClick={() => removeSchemaField(field.id)}
-                                  className="h-10 w-10"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="flex justify-between items-center">
-                      <Button variant="outline" onClick={addSchemaField}>
-                        <Plus className="h-4 w-4 mr-2" />
-                        Add Field
-                      </Button>
-
-                      <Button 
+              <div className="max-w-6xl mx-auto space-y-6">
+                <EnhancedSchemaBuilder
+                  onSchemaChange={setSchema}
+                />
+                
+                {/* Extraction Controls */}
+                {((schema && schema.properties && Object.keys(schema.properties).length > 0) || userPrompt.trim().length > 0) && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Extract Data</CardTitle>
+                      <CardDescription>
+                        {schema && schema.properties && Object.keys(schema.properties).length > 0 
+                          ? "Run the extraction process using your defined schema"
+                          : "Run the extraction process using your custom instructions"
+                        }
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <Button
                         onClick={processStructuredExtraction}
-                        disabled={isExtractingData || schema.length === 0 || schema.some(field => !field.name)}
-                        className="h-12 px-8"
+                        disabled={isExtractingData || !hasOCRResults}
+                        className="w-full"
                         size="lg"
                       >
                         {isExtractingData ? (
                           <>
-                            <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                             Extracting Data...
                           </>
                         ) : (
                           <>
-                            <Brain className="h-5 w-5 mr-2" />
+                            <Brain className="mr-2 h-4 w-4" />
                             Extract Structured Data
                           </>
                         )}
                       </Button>
-                    </div>
+                      {!hasOCRResults && (
+                        <p className="text-sm text-muted-foreground mt-2 text-center">
+                          Please upload and process an image first
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
 
-                    {error && (
-                      <Alert variant="destructive">
-                        <AlertCircle className="h-4 w-4" />
-                        <AlertDescription className="whitespace-pre-line">
-                          {error}
-                        </AlertDescription>
-                      </Alert>
-                    )}
+                {/* Additional User Prompt Section */}
+                <Card className="border shadow-sm">
+                  <CardHeader>
+                    <CardTitle className="text-lg">Additional Instructions (Optional)</CardTitle>
+                    <CardDescription>
+                      Provide additional context or specific instructions for the AI to better extract your data
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      <Label htmlFor="userPrompt">Custom Prompt</Label>
+                      <Textarea
+                        id="userPrompt"
+                        placeholder="e.g., Please focus on extracting dates in MM/DD/YYYY format, or look for signatures at the bottom of the document..."
+                        value={userPrompt}
+                        onChange={(e) => setUserPrompt(e.target.value)}
+                        rows={4}
+                        className="resize-none"
+                      />
+                      <p className="text-sm text-muted-foreground">
+                        This will be added to the extraction prompt to provide additional context to the AI model.
+                      </p>
+                    </div>
                   </CardContent>
                 </Card>
+
+                {error && (
+                  <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription className="whitespace-pre-line">
+                      {error}
+                    </AlertDescription>
+                  </Alert>
+                )}
               </div>
             </TabsContent>
 
             {/* Results Tab */}
-            <TabsContent value="results" className="space-y-6">
+            <TabsContent value="results" className="space-y-4">
               {hasStructuredResults && (
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                  {/* Image with Bounding Boxes */}
-                  <Card className="border-0 shadow-lg">
-                    <CardHeader>
-                      <CardTitle className="flex items-center space-x-2 text-lg">
-                        <Layout className="h-5 w-5 text-blue-600" />
-                        <span>Visual Field Mapping</span>
+                <div className="w-full overflow-hidden">
+                  <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 min-h-0">
+                    {/* Visual Field Mapping - Takes 3/4 of width (75%) */}
+                    <div className="lg:col-span-3 min-w-0">
+                      <Card className="border shadow-sm">
+                        <CardContent className="p-4">
+                          <div className="flex items-center gap-2 mb-3">
+                            <Layout className="h-4 w-4 text-blue-600" />
+                            <h3 className="text-base font-medium">Visual Field Mapping</h3>
+                          </div>
+                          <div className="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-3">
+                            <div className="w-full h-[500px] rounded-md overflow-hidden bg-white dark:bg-slate-900">
+                              <ImageWithBoundingBoxes
+                                imageSrc={imageBase64}
+                                groundedFields={structuredResults.grounded_fields || []}
+                                imageWidth={ocrResults?.image_dimensions?.width}
+                                imageHeight={ocrResults?.image_dimensions?.height}
+                                onFieldHover={setHoveredField}
+                                hoveredField={hoveredField}
+                              />
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </div>
+
+                    {/* Extracted Fields Display - Takes 1/4 of width (25%) - COMPACT */}
+                    <div className="lg:col-span-1 min-w-0">
+                      <div className="sticky top-4">
+                        <div className="space-y-2">
+                          <ExtractedFieldsDisplay
+                            structuredResults={structuredResults}
+                            onFieldHover={setHoveredField}
+                            hoveredField={hoveredField}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </TabsContent>
+
+            {/* AI Prompts Tab */}
+            <TabsContent value="prompts" className="space-y-4">
+              {fullPromptsUsed && (
+                <div className="w-full max-w-6xl mx-auto space-y-6">
+                  <div className="text-center mb-6">
+                    <h2 className="text-2xl font-bold mb-2 flex items-center justify-center gap-2">
+                      <Sparkles className="h-6 w-6 text-purple-600" />
+                      AI Prompts Used
+                    </h2>
+                    <p className="text-muted-foreground">
+                      Complete prompts sent to the AI model for structured data extraction
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* System Prompt */}
+                    {fullPromptsUsed.system_prompt && (
+                      <Card className="border shadow-lg h-fit">
+                        <CardHeader className="pb-4">
+                          <CardTitle className="text-xl flex items-center gap-2">
+                            <Settings className="h-6 w-6 text-blue-600" />
+                            System Prompt
+                          </CardTitle>
+                          <CardDescription>
+                            The complete system instructions including schema definition, OCR data, and extraction rules
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-4 border-l-4 border-blue-500">
+                            <div className="max-h-96 overflow-y-auto">
+                              <pre className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
+                                {fullPromptsUsed.system_prompt}
+                              </pre>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* User Prompt */}
+                    {fullPromptsUsed.user_prompt && (
+                      <Card className="border shadow-lg h-fit">
+                        <CardHeader className="pb-4">
+                          <CardTitle className="text-xl flex items-center gap-2">
+                            <Brain className="h-6 w-6 text-purple-600" />
+                            User Prompt
+                          </CardTitle>
+                          <CardDescription>
+                            The final user instructions sent to the AI model with extraction guidance and response format
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-4 border-l-4 border-purple-500">
+                            <div className="max-h-96 overflow-y-auto">
+                              <pre className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
+                                {fullPromptsUsed.user_prompt}
+                              </pre>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+                  </div>
+
+                  {/* Raw LLM Response */}
+                  {rawLlmResponse && (
+                    <Card className="border shadow-lg mt-6">
+                      <CardHeader className="pb-4">
+                        <CardTitle className="text-xl flex items-center gap-2">
+                          <MessageSquare className="h-6 w-6 text-green-600" />
+                          Raw LLM Response
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => navigator.clipboard.writeText(rawLlmResponse)}
+                            className="ml-auto text-xs"
+                          >
+                            Copy Response
+                          </Button>
+                        </CardTitle>
+                        <CardDescription>
+                          The exact response received from the AI model before any post-processing by the backend
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-4 border-l-4 border-green-500">
+                          <div className="max-h-96 overflow-y-auto">
+                            <pre className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
+                              {rawLlmResponse}
+                            </pre>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Prompt Statistics */}
+                  <Card className="border shadow-sm">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-lg flex items-center gap-2">
+                        <Zap className="h-5 w-5 text-green-600" />
+                        Prompt Statistics
                       </CardTitle>
-                      <CardDescription>
-                        Hover over fields to see their locations in the document
-                      </CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <div className="aspect-[4/3] min-h-[500px]">
-                        <ImageWithBoundingBoxes
-                          imageSrc={imageBase64}
-                          groundedFields={structuredResults.grounded_fields || []}
-                          imageWidth={ocrResults?.image_dimensions?.width}
-                          imageHeight={ocrResults?.image_dimensions?.height}
-                          onFieldHover={setHoveredField}
-                          hoveredField={hoveredField}
-                        />
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div className="text-center p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                          <div className="text-2xl font-bold text-blue-600">
+                            {fullPromptsUsed.system_prompt ? fullPromptsUsed.system_prompt.length : 0}
+                          </div>
+                          <div className="text-sm text-muted-foreground">System Prompt Characters</div>
+                        </div>
+                        <div className="text-center p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
+                          <div className="text-2xl font-bold text-purple-600">
+                            {fullPromptsUsed.user_prompt ? fullPromptsUsed.user_prompt.length : 0}
+                          </div>
+                          <div className="text-sm text-muted-foreground">User Prompt Characters</div>
+                        </div>
+                        <div className="text-center p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                          <div className="text-2xl font-bold text-green-600">
+                            {rawLlmResponse ? rawLlmResponse.length : 0}
+                          </div>
+                          <div className="text-sm text-muted-foreground">LLM Response Characters</div>
+                        </div>
+                        <div className="text-center p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+                          <div className="text-2xl font-bold text-orange-600">
+                            {(fullPromptsUsed.system_prompt?.length || 0) + (fullPromptsUsed.user_prompt?.length || 0) + (rawLlmResponse?.length || 0)}
+                          </div>
+                          <div className="text-sm text-muted-foreground">Total Characters</div>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
+                </div>
+              )}
 
-                  {/* Extracted Fields Display */}
-                  <div>
-                    <ExtractedFieldsDisplay
-                      structuredResults={structuredResults}
-                      onFieldHover={setHoveredField}
-                      hoveredField={hoveredField}
-                    />
-                  </div>
+              {!fullPromptsUsed && (
+                <div className="text-center py-12">
+                  <Sparkles className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="text-lg font-medium mb-2">No AI Prompts Available</h3>
+                  <p className="text-muted-foreground">
+                    Complete the structured data extraction process to see the AI prompts used.
+                  </p>
                 </div>
               )}
             </TabsContent>

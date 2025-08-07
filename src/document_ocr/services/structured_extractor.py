@@ -56,7 +56,7 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
         self,
         image_data: bytes,
         mime_type: str,
-        json_schema: Dict[str, Any],
+        json_schema: Optional[Dict[str, Any]] = None,
         user_prompt: Optional[str] = None,
         document_type: Optional[str] = None
     ) -> StructuredExtractionResult:
@@ -65,7 +65,7 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
         Args:
             image_data: Raw image bytes
             mime_type: MIME type of the image
-            json_schema: Target JSON schema for extraction
+            json_schema: Target JSON schema for extraction (optional)
             user_prompt: Additional user instructions
             document_type: Optional document type for specialized prompts
             
@@ -79,11 +79,18 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
         errors = []
         
         try:
-            # Step 1: Validate the JSON schema
-            logger.info("Validating JSON schema")
-            if not self.schema_validator.validate_schema(json_schema):
-                errors.append("Invalid JSON schema provided")
-                raise StructuredExtractionError("Invalid JSON schema")
+            # Validate inputs
+            if not json_schema and not user_prompt:
+                raise StructuredExtractionError("Either json_schema or user_prompt must be provided")
+            
+            # Step 1: Validate the JSON schema (if provided)
+            if json_schema:
+                logger.info("Validating JSON schema")
+                if not self.schema_validator.validate_schema(json_schema):
+                    errors.append("Invalid JSON schema provided")
+                    raise StructuredExtractionError("Invalid JSON schema")
+            else:
+                logger.info("No JSON schema provided, using user prompt only")
             
             # Step 2: Process document with OCR
             logger.info("Processing document with OCR")
@@ -137,15 +144,19 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
                 llm_response, ocr_results  # Use original OCR results for grounding
             )
             
-            # Step 5: Validate extracted data against schema
+            # Step 5: Validate extracted data against schema (if schema provided)
             extracted_data = llm_response.get("extracted_data", {})
-            schema_validation_passed = self.schema_validator.validate_data(extracted_data, json_schema)
+            schema_validation_passed = True  # Default to True if no schema provided
+            if json_schema:
+                schema_validation_passed = self.schema_validator.validate_data(extracted_data, json_schema)
             
             if not schema_validation_passed:
                 errors.append("Extracted data does not match the provided JSON schema")
             
             processing_time = time.time() - start_time
             llm_confidence = llm_response.get("overall_confidence", 0.0)
+            prompts_used = llm_response.get("prompts_used", {})
+            raw_llm_response = llm_response.get("raw_llm_response", None)
             
             logger.info(f"Structured extraction completed in {processing_time:.2f}s")
             
@@ -157,7 +168,9 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
                 processing_time=processing_time,
                 llm_confidence=llm_confidence,
                 schema_validation_passed=schema_validation_passed,
-                errors=errors
+                prompts_used=prompts_used,
+                errors=errors,
+                raw_llm_response=raw_llm_response
             )
             
         except Exception as e:
@@ -250,18 +263,21 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
             )
             
             # Step 5: Calculate extraction statistics
-            total_requested = len(json_schema.get("properties", {}))
+            total_requested = len(json_schema.get("properties", {})) if json_schema else 0
             extraction_stats = self._calculate_extraction_statistics(enhanced_fields, total_requested)
             
-            # Step 6: Validate extracted data against schema
+            # Step 6: Validate extracted data against schema (if schema provided)
             extracted_data = llm_response.get("extracted_data", {})
-            schema_validation_passed = self.schema_validator.validate_data(extracted_data, json_schema)
-            
-            if not schema_validation_passed:
-                errors.append("Extracted data does not match the provided JSON schema")
+            schema_validation_passed = True  # Default to True if no schema provided
+            if json_schema:
+                schema_validation_passed = self.schema_validator.validate_data(extracted_data, json_schema)
+                if not schema_validation_passed:
+                    errors.append("Extracted data does not match the provided JSON schema")
             
             processing_time = time.time() - start_time
             llm_confidence = llm_response.get("overall_confidence", 0.0)
+            prompts_used = llm_response.get("prompts_used", {})
+            raw_llm_response = llm_response.get("raw_llm_response", None)
             
             logger.info(f"Enhanced structured extraction completed in {processing_time:.2f}s")
             logger.info(f"Extraction statistics: {extraction_stats.success_rate:.2%} success rate, "
@@ -276,7 +292,9 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
                 llm_confidence=llm_confidence,
                 schema_validation_passed=schema_validation_passed,
                 extraction_statistics=extraction_stats,
-                errors=errors
+                prompts_used=prompts_used,
+                errors=errors,
+                raw_llm_response=raw_llm_response
             )
             
         except Exception as e:
@@ -308,11 +326,26 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
         for field_name, field_info in field_mappings.items():
             value = field_info.get("value")
             confidence = field_info.get("confidence", 0.0)
-            source_block_ids = field_info.get("source_block_ids", [])
             
-            # Get bounding boxes for the source text blocks
+            # Handle both source_block_id (singular) and source_block_ids (plural) formats
+            source_block_ids = field_info.get("source_block_ids", [])
+            if not source_block_ids:
+                # Try singular format
+                source_block_id = field_info.get("source_block_id")
+                if source_block_id is not None:
+                    if isinstance(source_block_id, (int, str)):
+                        source_block_ids = [source_block_id]
+                    else:
+                        source_block_ids = []
+            
+            # Post-process to select only the most specific text block per field
+            processed_block_ids = self._select_most_specific_text_blocks(
+                source_block_ids, ocr_results.text_blocks
+            )
+            
+            # Get bounding boxes for the processed source text blocks
             bounding_boxes = []
-            for block_id in source_block_ids:
+            for block_id in processed_block_ids:
                 if isinstance(block_id, int) and 0 <= block_id < len(ocr_results.text_blocks):
                     bounding_boxes.append(ocr_results.text_blocks[block_id].bounding_box)
             
@@ -320,13 +353,71 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
                 field_name=field_name,
                 value=value,
                 confidence=confidence,
-                source_text_blocks=source_block_ids,
+                source_text_blocks=processed_block_ids,
                 bounding_boxes=bounding_boxes
             )
             
             grounded_fields.append(grounded_field)
         
         return grounded_fields
+
+    def _select_most_specific_text_blocks(
+        self,
+        source_block_ids: list,
+        text_blocks: list
+    ) -> list:
+        """Select the single most specific text block that contains the entire field value.
+        
+        This post-processing step finds the smallest/most specific text element that can
+        contain the complete field value, ensuring one precise bounding box per field.
+        
+        Args:
+            source_block_ids: List of block IDs from LLM response
+            text_blocks: List of all OCR text blocks
+            
+        Returns:
+            List containing the single most specific block ID that covers the entire field
+        """
+        # Handle non-numeric IDs (like "visual_only")
+        numeric_ids = [
+            block_id for block_id in source_block_ids 
+            if isinstance(block_id, int) and 0 <= block_id < len(text_blocks)
+        ]
+        
+        # If no valid numeric IDs, return original list
+        if not numeric_ids:
+            return source_block_ids
+            
+        # If only one block, return it
+        if len(numeric_ids) == 1:
+            return numeric_ids
+        
+        # Find the smallest block that likely contains the entire field value
+        # Strategy: prefer the block with smallest area among the provided blocks
+        best_block_id = None
+        smallest_area = float('inf')
+        
+        for block_id in numeric_ids:
+            text_block = text_blocks[block_id]
+            bbox = text_block.bounding_box
+            
+            # Calculate area of bounding box
+            width = abs(bbox.x_max - bbox.x_min)
+            height = abs(bbox.y_max - bbox.y_min)
+            area = width * height
+            
+            # Select the smallest area (most specific element that contains the field)
+            if area < smallest_area:
+                smallest_area = area
+                best_block_id = block_id
+        
+        # Log the selected block for debugging
+        if best_block_id is not None and best_block_id < len(text_blocks):
+            selected_block = text_blocks[best_block_id]
+            logger.debug(f"Selected most specific block {best_block_id} (type: {selected_block.element_type}, area: {smallest_area:.6f}) from candidates: {numeric_ids}")
+        
+        # Return the single most specific block as a single-item list
+        return [best_block_id] if best_block_id is not None else numeric_ids[:1]
 
     def _process_enhanced_field_mappings(
         self,
@@ -340,11 +431,27 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
         for field_name, field_info in field_mappings.items():
             value = field_info.get("value")
             confidence = field_info.get("confidence", 0.0)
+            
+            # Handle both source_block_id (singular) and source_block_ids (plural) formats
             source_block_ids = field_info.get("source_block_ids", [])
+            if not source_block_ids:
+                # Try singular format
+                source_block_id = field_info.get("source_block_id")
+                if source_block_id is not None:
+                    if isinstance(source_block_id, (int, str)):
+                        source_block_ids = [source_block_id]
+                    else:
+                        source_block_ids = []
+            
             reasoning = field_info.get("reasoning", "No reasoning provided")
             
-            # Determine extraction source based on source_block_ids
-            extraction_source = self._determine_extraction_source(source_block_ids)
+            # Post-process to select only the most specific text block per field
+            processed_block_ids = self._select_most_specific_text_blocks(
+                source_block_ids, ocr_results.text_blocks
+            )
+            
+            # Determine extraction source based on processed source_block_ids
+            extraction_source = self._determine_extraction_source(processed_block_ids)
             
             # Get bounding boxes and OCR text for OCR-grounded fields
             bounding_boxes = []
@@ -352,7 +459,7 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
             
             if extraction_source == ExtractionSource.OCR_GROUNDED:
                 ocr_texts = []
-                for block_id in source_block_ids:
+                for block_id in processed_block_ids:
                     if isinstance(block_id, int) and 0 <= block_id < len(ocr_results.text_blocks):
                         text_block = ocr_results.text_blocks[block_id]
                         bounding_boxes.append(text_block.bounding_box)
@@ -364,7 +471,7 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
             # Clean source_text_blocks for enhanced field (only integers)
             source_text_blocks = []
             if extraction_source == ExtractionSource.OCR_GROUNDED:
-                source_text_blocks = [bid for bid in source_block_ids if isinstance(bid, int)]
+                source_text_blocks = [bid for bid in processed_block_ids if isinstance(bid, int)]
             
             enhanced_field = EnhancedGroundedDataField(
                 field_name=field_name,

@@ -109,7 +109,7 @@ class GoogleDocumentAIOCRService(OCRService):
 
             print("Document processed successfully")
 
-            print('Raw Document AI response:', document)
+            # print('Raw Document AI response:', document)
             
             # Convert Document AI response to dict for debugging (serialize the protobuf)
             raw_response = None

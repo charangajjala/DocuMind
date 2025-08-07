@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 class OptimizationStrategy(Enum):
     """Different strategies for optimizing text elements."""
     HIERARCHICAL = "hierarchical"  # Use only highest level non-overlapping elements
+    LEAF_LEVEL = "leaf_level"     # Prefer smallest/most specific elements (leaf nodes)
     SEMANTIC = "semantic"         # Prioritize semantic elements (blocks, paragraphs)
     SPATIAL = "spatial"           # Remove spatially redundant elements
     HYBRID = "hybrid"            # Combine multiple strategies
@@ -22,7 +23,7 @@ class OptimizationStrategy(Enum):
 @dataclass
 class OptimizationConfig:
     """Configuration for text element optimization."""
-    strategy: OptimizationStrategy = OptimizationStrategy.HYBRID
+    strategy: OptimizationStrategy = OptimizationStrategy.LEAF_LEVEL  # Changed default
     max_elements: int = 200  # Maximum elements to send to LLM
     prefer_element_types: List[str] = None  # Preferred element types in order
     remove_overlapping: bool = True  # Remove spatially overlapping elements

@@ -50,8 +50,8 @@ CRITICAL: You are working with TWO DIFFERENT SCHEMAS:
 EXTRACTION STRATEGY:
 • Use BOTH visual analysis AND OCR results for maximum accuracy
 • You are NOT limited to OCR-only data - extract visually readable information even if OCR missed it
-• When information matches OCR text blocks, reference those block IDs for grounding
-• For purely visual extractions, use ["visual_only"] in source_block_ids
+• When information matches OCR text blocks, reference that block ID for grounding
+• For purely visual extractions, use "visual_only" in source_block_id
 
 RESPONSE REQUIREMENTS:
 • Extract data according to the DATA EXTRACTION SCHEMA (from system context)
@@ -60,18 +60,64 @@ RESPONSE REQUIREMENTS:
 {response_schema}
 
 FIELD MAPPING RULES:
-• OCR grounded: Use actual OCR text block IDs [0, 1, 2]
-• Visual only: Use ["visual_only"] 
+• CRITICAL: Each field must map to exactly ONE source block - the most specific OCR text block that contains the complete field value
+• Find the smallest/most precise text block that fully contains your extracted value
+• OCR grounded: Use single OCR text block ID  
+• Visual only: Use "visual_only"
 • Missing/unclear: Use null for optional fields
 • Maintain precise data types (strings, numbers, dates)
+
+BLOCK SELECTION PRIORITY (Most Specific First):
+The OCR blocks follow a hierarchy from smallest to largest:
+1. Token (word) - Individual word or punctuation (MOST SPECIFIC)
+2. Line - Visual line containing multiple tokens  
+3. Paragraph - Multiple lines forming coherent text blocks
+4. Block - Largest region containing multiple paragraphs (LEAST SPECIFIC)
+
+• Always select the SMALLEST block level that contains the COMPLETE field value
+• Single word → Token block
+• Multiple words on same line → Line block  
+• Multiple lines → Paragraph block
+• Multiple paragraphs → Block level
+• This ensures the most precise bounding boxes for visual grounding
 
 CONFIDENCE SCORING:
 • Base confidence on visual clarity + OCR confirmation
 • Higher confidence when both visual and OCR agree
-• Lower confidence for visual-only or unclear extractions"""
+• Lower confidence for visual-only or unclear extractions
+
+REASONING REQUIREMENTS:
+For each field extraction, provide comprehensive reasoning that explains:
+
+1. SEMANTIC MATCHING: Why does this extracted value logically match the requested field?
+   - What makes this value appropriate for this field type?
+   - How does the context around the value support this interpretation?
+   - Any semantic validation performed (format, data type, expected patterns)
+
+2. LOCATION IDENTIFICATION: Where was this value found in the document?
+   - Visual location description (e.g., "top-right corner", "header section", "table cell 2")
+   - OCR text block reference if applicable
+   - Surrounding context or labels that helped identify it
+
+3. BLOCK SELECTION LOGIC: Why was this specific OCR block chosen?
+   - Which block level was selected (Token/Line/Paragraph/Block) and why
+   - Why this block contains the complete value without extra text
+   - How it compares to other potential blocks (more/less specific)
+
+4. CONFIDENCE FACTORS: What affects the confidence score?
+   - Visual clarity of the text/value
+   - OCR recognition quality
+   - Ambiguity or alternative interpretations
+   - Supporting context or validation clues
+"""
     
     if user_prompt:
-        return f"{base_prompt}\n\nAdditional instructions: {user_prompt}"
+        return f"""{base_prompt}
+
+IMPORTANT USER INSTRUCTIONS:
+{user_prompt}
+
+Follow these user instructions carefully as they provide critical guidance for this specific document extraction task."""
     
     return base_prompt
 
@@ -107,7 +153,7 @@ RESPONSE REQUIREMENTS:
 {response_schema}
 
 FIELD MAPPING RULES:
-• Always use ["visual_only"] in source_block_ids
+• Always use "visual_only" in source_block_id
 • Use null for fields that cannot be clearly identified
 • Maintain precise data types (strings, numbers, dates)
 
@@ -116,6 +162,11 @@ CONFIDENCE SCORING:
 • Be conservative - don't guess when information is unclear"""
     
     if user_prompt:
-        return f"{base_prompt}\n\nAdditional instructions: {user_prompt}"
+        return f"""{base_prompt}
+
+IMPORTANT USER INSTRUCTIONS:
+{user_prompt}
+
+Follow these user instructions carefully as they provide critical guidance for this specific document extraction task."""
     
     return base_prompt

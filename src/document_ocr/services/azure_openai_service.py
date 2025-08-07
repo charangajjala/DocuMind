@@ -13,7 +13,7 @@ from ..core.exceptions import DocumentOCRError
 from ..models.domain import DocumentOCRResult, TextBlock
 from ..prompts.system_prompts import get_extraction_system_prompt, get_enhanced_system_prompt
 from ..prompts.user_prompts import get_base_extraction_prompt
-from ..prompts.document_type_prompts import get_document_type_prompt, get_schema_specific_prompt
+from ..prompts.document_type_prompts import get_schema_specific_prompt
 
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ class AzureOpenAIService(LLMProvider):
         self,
         image_data: bytes,
         ocr_results: DocumentOCRResult,
-        json_schema: Dict[str, Any],
+        json_schema: Optional[Dict[str, Any]] = None,
         user_prompt: Optional[str] = None,
         document_type: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -76,7 +76,7 @@ class AzureOpenAIService(LLMProvider):
         Args:
             image_data: Raw image bytes
             ocr_results: OCR results from Google Document AI
-            json_schema: Target JSON schema for extraction
+            json_schema: Target JSON schema for extraction (optional)
             user_prompt: Additional user instructions
             document_type: Optional document type for specialized prompts
             
@@ -90,8 +90,8 @@ class AzureOpenAIService(LLMProvider):
             # Prepare the prompts using modular system
             system_prompt = self._create_system_prompt(json_schema, ocr_results, document_type)
             
-            # Prepare user prompt
-            final_user_prompt = self._create_user_prompt(user_prompt, json_schema, document_type)
+            # Prepare user prompt (document_type parameter is ignored)
+            final_user_prompt = self._create_user_prompt(user_prompt, json_schema)
             
             # Encode image to base64
             image_b64 = base64.b64encode(image_data).decode('utf-8')
@@ -129,11 +129,24 @@ class AzureOpenAIService(LLMProvider):
                 response_format={"type": "json_object"}
             )
             
-            # Parse the response
-            extracted_data = json.loads(response.choices[0].message.content)
+            # Capture the raw LLM response before any processing
+            raw_llm_response = response.choices[0].message.content
+            
+            # Log the raw response for debugging
+            logger.info(f"Raw LLM response: {raw_llm_response}")
+            
+            # Parse the response - LLM returns ExtractionResponse format
+            llm_full_response = json.loads(raw_llm_response)
+            
+            # Add the prompts used and raw response to the LLM response
+            llm_full_response["prompts_used"] = {
+                "system_prompt": system_prompt,
+                "user_prompt": final_user_prompt
+            }
+            llm_full_response["raw_llm_response"] = raw_llm_response
             
             logger.info(f"Successfully extracted structured data using Azure OpenAI")
-            return extracted_data
+            return llm_full_response
             
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse Azure OpenAI response as JSON: {e}")
@@ -145,7 +158,7 @@ class AzureOpenAIService(LLMProvider):
     
     def _create_system_prompt(
         self,
-        json_schema: Dict[str, Any],
+        json_schema: Optional[Dict[str, Any]],
         ocr_results: DocumentOCRResult,
         document_type: Optional[str] = None
     ) -> str:
@@ -185,19 +198,12 @@ class AzureOpenAIService(LLMProvider):
     def _create_user_prompt(
         self, 
         user_prompt: Optional[str] = None,
-        json_schema: Optional[Dict[str, Any]] = None,
-        document_type: Optional[str] = None
+        json_schema: Optional[Dict[str, Any]] = None
     ) -> str:
         """Create user prompt for extraction using modular prompts."""
         
         # Start with base extraction prompt
         base_prompt = get_base_extraction_prompt(user_prompt)
-        
-        # Add document-type specific guidance
-        if document_type:
-            type_specific_prompt = get_document_type_prompt(document_type)
-            if type_specific_prompt:
-                base_prompt += f"\n\n{type_specific_prompt}"
         
         # Add schema-specific guidance
         if json_schema and 'properties' in json_schema:

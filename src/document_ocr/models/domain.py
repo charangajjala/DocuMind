@@ -2,7 +2,7 @@
 
 from typing import List, Optional, Tuple, Dict, Any
 from dataclasses import dataclass
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from enum import Enum
 
 
@@ -163,10 +163,17 @@ class StructuredExtractionRequest(BaseModel):
     """Request model for structured data extraction API."""
     
     image_data: str  # base64 encoded image
-    json_schema: dict  # JSON schema for extraction
+    json_schema: Optional[dict] = None  # JSON schema for extraction
     user_prompt: Optional[str] = None  # Additional user instructions
     document_type: Optional[str] = None  # Document type hint for specialized prompts
     confidence_threshold: float = 0.8
+    
+    @model_validator(mode='after')
+    def validate_schema_or_prompt(self):
+        """Ensure at least one of json_schema or user_prompt is provided."""
+        if not self.json_schema and not self.user_prompt:
+            raise ValueError('Either json_schema or user_prompt must be provided')
+        return self
     
     class Config:
         json_schema_extra = {
@@ -267,7 +274,9 @@ class EnhancedStructuredExtractionResult:
     llm_confidence: float
     schema_validation_passed: bool
     extraction_statistics: ExtractionStatistics
+    prompts_used: Dict[str, str]
     errors: List[str]
+    raw_llm_response: Optional[str] = None  # Raw response from LLM before post-processing
     
     def get_field_by_name(self, field_name: str) -> Optional[EnhancedGroundedDataField]:
         """Get enhanced grounded field by name."""
@@ -324,7 +333,9 @@ class StructuredExtractionResult:
     processing_time: float
     llm_confidence: float
     schema_validation_passed: bool
+    prompts_used: Dict[str, str]
     errors: List[str]
+    raw_llm_response: Optional[str] = None  # Raw response from LLM before post-processing
     
     def get_field_by_name(self, field_name: str) -> Optional[GroundedDataField]:
         """Get grounded field by name."""
@@ -344,8 +355,10 @@ class StructuredExtractionResponse(BaseModel):
     processing_time: float
     llm_confidence: float
     schema_validation_passed: bool
+    prompts_used: Optional[dict] = None
     errors: List[str]
     error_message: Optional[str] = None
+    raw_llm_response: Optional[str] = None  # Raw response from LLM before post-processing
     
     class Config:
         json_schema_extra = {

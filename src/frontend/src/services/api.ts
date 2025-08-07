@@ -68,12 +68,25 @@ export class ApiService {
     return this.handleResponse<OCRResponse>(response);
   }
 
-  static async extractStructuredData(imageData: string, jsonSchema: any, userPrompt?: string): Promise<any> {
-    const request = {
+  static async extractStructuredData(imageData: string, jsonSchema?: any, userPrompt?: string): Promise<any> {
+    // Validate that at least one of schema or prompt is provided
+    if (!jsonSchema && !userPrompt) {
+      throw new Error('Either jsonSchema or userPrompt must be provided');
+    }
+
+    const request: any = {
       image_data: imageData,
-      json_schema: jsonSchema,
-      user_prompt: userPrompt,
     };
+
+    // Only include schema if provided
+    if (jsonSchema) {
+      request.json_schema = jsonSchema;
+    }
+
+    // Only include user prompt if provided
+    if (userPrompt) {
+      request.user_prompt = userPrompt;
+    }
 
     const response = await fetch(`${API_BASE_URL}/extract/structured`, {
       method: 'POST',
