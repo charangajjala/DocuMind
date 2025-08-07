@@ -17,6 +17,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useState } from 'react';
+import type { JSX } from 'react';
 
 interface ExtractedFieldsDisplayProps {
   structuredResults: any;
@@ -47,9 +48,20 @@ export function ExtractedFieldsDisplay({
 
   const { extracted_data, grounded_fields, processing_time, llm_confidence, schema_validation_passed } = structuredResults;
 
+  // Group by top-level object/array for consistent coloring
+  const normalizeGroupKey = (fieldName: string) => {
+    const cleaned = fieldName.replace(/\[[^\]]*\]/g, '');
+    return cleaned.split('.')[0] || cleaned;
+  };
+
+  const groupKeyToColor: Record<string, string> = {};
   const getFieldColor = (fieldName: string) => {
-    const index = grounded_fields?.findIndex((field: any) => field.field_name === fieldName) || 0;
-    return COLORS[index % COLORS.length];
+    const key = normalizeGroupKey(fieldName);
+    if (!groupKeyToColor[key]) {
+      const idx = Object.keys(groupKeyToColor).length;
+      groupKeyToColor[key] = COLORS[idx % COLORS.length];
+    }
+    return groupKeyToColor[key];
   };
 
   const formatValue = (value: any): string => {
@@ -75,6 +87,12 @@ export function ExtractedFieldsDisplay({
     setBboxPopupField(fieldName);
     onFieldHover?.(fieldName);
   };
+
+  // Hover helpers for grouped objects/arrays
+  const handleGroupHover = (groupPath: string) => {
+    onFieldHover?.(`group:${groupPath}`);
+  };
+  const handleGroupLeave = () => onFieldHover?.(null);
 
   const handleFieldLeave = () => {
     setBboxPopupField(null);
@@ -183,6 +201,47 @@ export function ExtractedFieldsDisplay({
     return showAllReasoning || expandedReasoningFields.has(fieldName);
   };
 
+  // Recursively render values and attach group-aware hover to each path
+  const renderValueRecursive = (path: string, value: any): JSX.Element => {
+    if (value === null || value === undefined) {
+      return <p className="text-sm text-muted-foreground">N/A</p>;
+    }
+    if (Array.isArray(value)) {
+      return (
+        <div
+          onMouseEnter={() => handleGroupHover(path)}
+          onMouseLeave={handleGroupLeave}
+          className="text-xs font-mono bg-muted/50 rounded p-2"
+        >
+          {value.map((item, idx) => (
+            <div key={idx} className="ml-2">
+              <div className="text-[11px] text-muted-foreground">[{idx}]</div>
+              {renderValueRecursive(`${path}[${idx}]`, item)}
+            </div>
+          ))}
+        </div>
+      );
+    }
+    if (typeof value === 'object') {
+      return (
+        <div
+          onMouseEnter={() => handleGroupHover(path)}
+          onMouseLeave={handleGroupLeave}
+          className="text-xs font-mono bg-muted/50 rounded p-2"
+        >
+          {Object.entries(value).map(([k, v]) => (
+            <div key={k} className="ml-2">
+              <div className="text-[11px] text-muted-foreground">{k}:</div>
+              {renderValueRecursive(`${path}.${k}`, v)}
+            </div>
+          ))}
+        </div>
+      );
+    }
+    // Primitive
+    return <p className="text-sm font-medium break-words">{String(value)}</p>;
+  };
+
   return (
     <TooltipProvider>
       <div className="space-y-3">
@@ -269,10 +328,20 @@ export function ExtractedFieldsDisplay({
                     >
                       <MessageSquare className="h-4 w-4 mr-1" />
                       {showAllReasoning ? 'Hide' : 'Show'} Reasoning
+                      {grounded_fields && (
+                        <span className="ml-1 text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-1.5 py-0.5 rounded-full">
+                          {grounded_fields.filter((gf: any) => gf.reasoning).length}
+                        </span>
+                      )}
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
                     <p>{showAllReasoning ? 'Hide' : 'Show'} AI reasoning for all fields</p>
+                    {grounded_fields && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {grounded_fields.filter((gf: any) => gf.reasoning).length} fields have reasoning available
+                      </p>
+                    )}
                   </TooltipContent>
                 </Tooltip>
                 <Tooltip>
@@ -340,16 +409,8 @@ export function ExtractedFieldsDisplay({
                           </div>
 
                           {/* Field Value - Compact */}
-                          <div className="ml-4">
-                            {typeof value === 'object' && value !== null ? (
-                              <pre className="text-xs font-mono text-foreground break-words whitespace-pre-wrap bg-muted/50 p-2 rounded">
-                                {formatValue(value)}
-                              </pre>
-                            ) : (
-                              <p className="text-sm font-medium text-foreground break-words">
-                                {formatValue(value)}
-                              </p>
-                            )}
+                          <div className="ml-4 space-y-1">
+                            {renderValueRecursive(fieldName, value)}
                           </div>
 
                           {/* Reasoning Display - Enhanced with Toggle */}
@@ -373,6 +434,11 @@ export function ExtractedFieldsDisplay({
                                     <span className="font-medium text-slate-700 dark:text-slate-300">
                                       AI Reasoning
                                     </span>
+                                    {!isReasoningVisible(fieldName) && (
+                                      <span className="text-xs text-blue-500 bg-blue-100 dark:bg-blue-900/30 px-1 py-0.5 rounded">
+                                        Click to show
+                                      </span>
+                                    )}
                                   </div>
                                 </Button>
                                 

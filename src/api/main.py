@@ -164,7 +164,7 @@ async def extract_text_from_base64(request: OCRRequest):
             success=True,
             image_quality=image_quality_dict,
             original_image_info=result.original_image_info,
-            raw_document_ai_response=result.raw_document_ai_response
+
         )
         
     except InvalidImageError as e:
@@ -251,7 +251,7 @@ async def extract_text_from_upload(
             success=True,
             image_quality=image_quality_dict,
             original_image_info=result.original_image_info,
-            raw_document_ai_response=result.raw_document_ai_response
+
         )
         
     except InvalidImageError as e:
@@ -334,6 +334,7 @@ async def extract_structured_data(request: StructuredExtractionRequest):
                 "value": field.value,
                 "confidence": field.confidence,
                 "source_text_blocks": field.source_text_blocks,
+                "reasoning": field.reasoning,
                 "bounding_boxes": [
                     {
                         "x_min": bbox.x_min,

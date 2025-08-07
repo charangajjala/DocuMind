@@ -17,8 +17,8 @@ from ..models.domain import (
     ExtractionSource,
     ExtractionStatistics
 )
-from .text_element_optimizer import TextElementOptimizer, OptimizationConfig, OptimizationStrategy
 
+from .safe_ocr_selector import SafeOCRSelector
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +35,7 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
         self,
         document_processor: DocumentProcessor,
         llm_provider: LLMProvider,
-        schema_validator: SchemaValidator,
-        optimizer_config: OptimizationConfig = None
+        schema_validator: SchemaValidator
     ):
         """Initialize the structured extractor.
         
@@ -44,12 +43,11 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
             document_processor: OCR processor for document analysis
             llm_provider: LLM service for structured extraction
             schema_validator: JSON schema validator
-            optimizer_config: Configuration for text element optimization
         """
         self.document_processor = document_processor
         self.llm_provider = llm_provider
         self.schema_validator = schema_validator
-        self.text_optimizer = TextElementOptimizer(optimizer_config)
+        self.selector = SafeOCRSelector()
     
     
     async def extract_with_visual_grounding(
@@ -105,46 +103,26 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
                 logger.warning("No text blocks found in OCR results")
                 ocr_results.text_blocks = []  # Initialize as empty list to prevent None errors
             
-            # Step 2.5: Optimize text blocks for LLM efficiency
-            logger.info(f"Optimizing {len(ocr_results.text_blocks)} text blocks for LLM")
-            optimized_text_blocks = self.text_optimizer.optimize_for_llm(
-                ocr_results.text_blocks,
-                json_schema=json_schema,
-                user_context=user_prompt
-            )
-            optimization_summary = self.text_optimizer.get_optimization_summary(
-                len(ocr_results.text_blocks), len(optimized_text_blocks)
-            )
-            logger.info(f"Text optimization complete: {optimization_summary}")
-            
-            # Create optimized OCR results for LLM processing
-            optimized_ocr_results = DocumentOCRResult(
-                full_text=ocr_results.full_text,
-                text_blocks=optimized_text_blocks,
-                image_width=ocr_results.image_width,
-                image_height=ocr_results.image_height,
-                processing_time=ocr_results.processing_time,
-                image_quality=ocr_results.image_quality,
-                raw_document_ai_response=ocr_results.raw_document_ai_response
-            )
-            
-            # Step 3: Extract structured data using LLM (with optimized text blocks)
+            # Step 3: Build a safe subset for LLM input (non-destructive)
+            subset_ocr = self.selector.select_subset(ocr_results, json_schema)
+
+            # Step 4: Extract structured data using LLM (with subset)
             logger.info("Extracting structured data with LLM")
             llm_response = await self.llm_provider.extract_structured_data(
                 image_data=image_data,
-                ocr_results=optimized_ocr_results,  # Use optimized results
+                ocr_results=subset_ocr,  # Use safe subset for LLM
                 json_schema=json_schema,
                 user_prompt=user_prompt,
                 document_type=document_type  # Pass document type to LLM
             )
             
-            # Step 4: Process field mappings and create grounded fields
+            # Step 5: Process field mappings and create grounded fields using ORIGINAL OCR
             logger.info("Processing field mappings and visual grounding")
             grounded_fields = self._process_field_mappings(
-                llm_response, ocr_results  # Use original OCR results for grounding
+                llm_response, ocr_results  # Use original OCR for bounding boxes
             )
             
-            # Step 5: Validate extracted data against schema (if schema provided)
+            # Step 6: Validate extracted data against schema (if schema provided)
             extracted_data = llm_response.get("extracted_data", {})
             schema_validation_passed = True  # Default to True if no schema provided
             if json_schema:
@@ -223,50 +201,30 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
                 errors.append("No text blocks found in document")
                 logger.warning("No text blocks found in OCR results")
             
-            # Step 2.5: Optimize text blocks for LLM efficiency
-            logger.info(f"Optimizing {len(ocr_results.text_blocks)} text blocks for enhanced LLM processing")
-            optimized_text_blocks = self.text_optimizer.optimize_for_llm(
-                ocr_results.text_blocks,
-                json_schema=json_schema,
-                user_context=user_prompt
-            )
-            optimization_summary = self.text_optimizer.get_optimization_summary(
-                len(ocr_results.text_blocks), len(optimized_text_blocks)
-            )
-            logger.info(f"Enhanced text optimization complete: {optimization_summary}")
-            
-            # Create optimized OCR results for LLM processing
-            optimized_ocr_results = DocumentOCRResult(
-                full_text=ocr_results.full_text,
-                text_blocks=optimized_text_blocks,
-                image_width=ocr_results.image_width,
-                image_height=ocr_results.image_height,
-                processing_time=ocr_results.processing_time,
-                image_quality=ocr_results.image_quality,
-                raw_document_ai_response=ocr_results.raw_document_ai_response
-            )
-            
-            # Step 3: Extract structured data using LLM (with optimized text blocks)
+            # Step 3: Build a safe subset for LLM input (non-destructive)
+            subset_ocr = self.selector.select_subset(ocr_results, json_schema)
+
+            # Step 4: Extract structured data using LLM
             logger.info("Extracting structured data with LLM")
             llm_response = await self.llm_provider.extract_structured_data(
                 image_data=image_data,
-                ocr_results=optimized_ocr_results,  # Use optimized results
+                ocr_results=subset_ocr,  # Use safe subset for LLM
                 json_schema=json_schema,
                 user_prompt=user_prompt,
                 document_type=document_type
             )
             
-            # Step 4: Process field mappings and create enhanced grounded fields
+            # Step 5: Process field mappings and create enhanced grounded fields using ORIGINAL OCR
             logger.info("Processing enhanced field mappings and visual grounding")
             enhanced_fields = self._process_enhanced_field_mappings(
-                llm_response, ocr_results  # Use original OCR results for grounding
+                llm_response, ocr_results  # Use original OCR for bounding boxes
             )
             
-            # Step 5: Calculate extraction statistics
+            # Step 6: Calculate extraction statistics
             total_requested = len(json_schema.get("properties", {})) if json_schema else 0
             extraction_stats = self._calculate_extraction_statistics(enhanced_fields, total_requested)
             
-            # Step 6: Validate extracted data against schema (if schema provided)
+            # Step 7: Validate extracted data against schema (if schema provided)
             extracted_data = llm_response.get("extracted_data", {})
             schema_validation_passed = True  # Default to True if no schema provided
             if json_schema:
@@ -320,104 +278,113 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
         ocr_results: DocumentOCRResult
     ) -> List[GroundedDataField]:
         """Process LLM field mappings into grounded data fields."""
-        grounded_fields = []
+        grounded_fields: List[GroundedDataField] = []
         field_mappings = llm_response.get("field_mappings", {})
-        
-        for field_name, field_info in field_mappings.items():
-            value = field_info.get("value")
-            confidence = field_info.get("confidence", 0.0)
-            
-            # Handle both source_block_id (singular) and source_block_ids (plural) formats
-            source_block_ids = field_info.get("source_block_ids", [])
-            if not source_block_ids:
-                # Try singular format
-                source_block_id = field_info.get("source_block_id")
-                if source_block_id is not None:
-                    if isinstance(source_block_id, (int, str)):
-                        source_block_ids = [source_block_id]
-                    else:
-                        source_block_ids = []
-            
-            # Post-process to select only the most specific text block per field
-            processed_block_ids = self._select_most_specific_text_blocks(
-                source_block_ids, ocr_results.text_blocks
-            )
-            
-            # Get bounding boxes for the processed source text blocks
-            bounding_boxes = []
-            for block_id in processed_block_ids:
-                if isinstance(block_id, int) and 0 <= block_id < len(ocr_results.text_blocks):
-                    bounding_boxes.append(ocr_results.text_blocks[block_id].bounding_box)
-            
-            grounded_field = GroundedDataField(
-                field_name=field_name,
-                value=value,
-                confidence=confidence,
-                source_text_blocks=processed_block_ids,
-                bounding_boxes=bounding_boxes
-            )
-            
-            grounded_fields.append(grounded_field)
-        
-        return grounded_fields
 
-    def _select_most_specific_text_blocks(
-        self,
-        source_block_ids: list,
-        text_blocks: list
-    ) -> list:
-        """Select the single most specific text block that contains the entire field value.
-        
-        This post-processing step finds the smallest/most specific text element that can
-        contain the complete field value, ensuring one precise bounding box per field.
-        
-        Args:
-            source_block_ids: List of block IDs from LLM response
-            text_blocks: List of all OCR text blocks
-            
-        Returns:
-            List containing the single most specific block ID that covers the entire field
-        """
-        # Handle non-numeric IDs (like "visual_only")
-        numeric_ids = [
-            block_id for block_id in source_block_ids 
-            if isinstance(block_id, int) and 0 <= block_id < len(text_blocks)
-        ]
-        
-        # If no valid numeric IDs, return original list
-        if not numeric_ids:
-            return source_block_ids
-            
-        # If only one block, return it
-        if len(numeric_ids) == 1:
-            return numeric_ids
-        
-        # Find the smallest block that likely contains the entire field value
-        # Strategy: prefer the block with smallest area among the provided blocks
-        best_block_id = None
-        smallest_area = float('inf')
-        
-        for block_id in numeric_ids:
-            text_block = text_blocks[block_id]
-            bbox = text_block.bounding_box
-            
-            # Calculate area of bounding box
-            width = abs(bbox.x_max - bbox.x_min)
-            height = abs(bbox.y_max - bbox.y_min)
-            area = width * height
-            
-            # Select the smallest area (most specific element that contains the field)
-            if area < smallest_area:
-                smallest_area = area
-                best_block_id = block_id
-        
-        # Log the selected block for debugging
-        if best_block_id is not None and best_block_id < len(text_blocks):
-            selected_block = text_blocks[best_block_id]
-            logger.debug(f"Selected most specific block {best_block_id} (type: {selected_block.element_type}, area: {smallest_area:.6f}) from candidates: {numeric_ids}")
-        
-        # Return the single most specific block as a single-item list
-        return [best_block_id] if best_block_id is not None else numeric_ids[:1]
+        def is_leaf_mapping(node: Any) -> bool:
+            return isinstance(node, dict) and (
+                "value" in node and ("source_block_id" in node or "source_block_ids" in node or "confidence" in node or "reasoning" in node)
+            )
+
+        def normalize_ids(field_info: Dict[str, Any]) -> List[int]:
+            # Accept single id, list of ids, or "visual_only"
+            raw = field_info.get("source_block_id")
+            if raw is None:
+                return []
+            if raw == "visual_only":
+                return []
+            # Normalize to list
+            raw_list = raw if isinstance(raw, list) else [raw]
+            ids: List[int] = []
+            for bid in raw_list:
+                if bid == "visual_only":
+                    # Entire field treated as visual only
+                    return []
+                if isinstance(bid, int):
+                    ids.append(bid)
+                elif isinstance(bid, str) and bid.isdigit():
+                    ids.append(int(bid))
+            # Deduplicate while preserving order
+            seen = set()
+            deduped: List[int] = []
+            for i in ids:
+                if i not in seen:
+                    seen.add(i)
+                    deduped.append(i)
+            return deduped
+
+        def _normalize_text(text: Any) -> str:
+            try:
+                s = str(text).lower().strip()
+            except Exception:
+                return ""
+            # Collapse whitespace
+            import re
+            return re.sub(r"\s+", " ", s)
+
+        def enforce_single_block_if_possible(value: Any, ids: List[int]) -> List[int]:
+            """If any single OCR block contains the complete value, prefer that single block.
+            Otherwise, keep the provided list (for true multi-block spans)."""
+            # If LLM already chose single, keep it
+            if len(ids) <= 1:
+                return ids
+
+            value_norm = _normalize_text(value)
+            if not value_norm:
+                return ids
+
+            # Specificity ranking
+            specificity = {"token": 4, "line": 3, "paragraph": 2, "block": 1}
+
+            best_idx = None
+            best_score = -1.0
+            for i, block in enumerate(ocr_results.text_blocks):
+                block_text_norm = _normalize_text(block.text)
+                if value_norm and block_text_norm and value_norm in block_text_norm:
+                    score = specificity.get(getattr(block, "element_type", "block"), 1) * 10 + float(block.confidence or 0)
+                    if score > best_score:
+                        best_score = score
+                        best_idx = i
+
+            if best_idx is not None:
+                return [best_idx]
+            return ids
+
+        def walk(prefix: str, node: Any):
+            if is_leaf_mapping(node):
+                field_name = prefix
+                field_info = node
+                value = field_info.get("value")
+                confidence = field_info.get("confidence", 0.0)
+                reasoning = field_info.get("reasoning", "No reasoning provided")
+                source_block_ids = normalize_ids(field_info)
+                source_block_ids = enforce_single_block_if_possible(value, source_block_ids)
+
+                # Build bounding boxes from normalized ids
+                bounding_boxes: List[BoundingBox] = []
+                for block_id in source_block_ids:
+                    if isinstance(block_id, int) and 0 <= block_id < len(ocr_results.text_blocks):
+                        bounding_boxes.append(ocr_results.text_blocks[block_id].bounding_box)
+
+                grounded_fields.append(
+                    GroundedDataField(
+                        field_name=field_name,
+                        value=value,
+                        confidence=confidence,
+                        source_text_blocks=source_block_ids,
+                        bounding_boxes=bounding_boxes,
+                        reasoning=reasoning,
+                    )
+                )
+                return
+
+            if isinstance(node, dict):
+                for key, child in node.items():
+                    new_prefix = f"{prefix}.{key}" if prefix else str(key)
+                    walk(new_prefix, child)
+
+        walk("", field_mappings)
+        return grounded_fields
 
     def _process_enhanced_field_mappings(
         self,
@@ -427,66 +394,78 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
         """Process LLM field mappings into enhanced grounded data fields."""
         enhanced_fields = []
         field_mappings = llm_response.get("field_mappings", {})
-        
-        for field_name, field_info in field_mappings.items():
-            value = field_info.get("value")
-            confidence = field_info.get("confidence", 0.0)
-            
-            # Handle both source_block_id (singular) and source_block_ids (plural) formats
-            source_block_ids = field_info.get("source_block_ids", [])
-            if not source_block_ids:
-                # Try singular format
-                source_block_id = field_info.get("source_block_id")
-                if source_block_id is not None:
-                    if isinstance(source_block_id, (int, str)):
-                        source_block_ids = [source_block_id]
-                    else:
-                        source_block_ids = []
-            
-            reasoning = field_info.get("reasoning", "No reasoning provided")
-            
-            # Post-process to select only the most specific text block per field
-            processed_block_ids = self._select_most_specific_text_blocks(
-                source_block_ids, ocr_results.text_blocks
+
+        def is_leaf_mapping(node: Any) -> bool:
+            return isinstance(node, dict) and (
+                "value" in node and ("source_block_id" in node or "source_block_ids" in node or "confidence" in node or "reasoning" in node)
             )
-            
-            # Determine extraction source based on processed source_block_ids
-            extraction_source = self._determine_extraction_source(processed_block_ids)
-            
-            # Get bounding boxes and OCR text for OCR-grounded fields
-            bounding_boxes = []
-            ocr_text_found = None
-            
-            if extraction_source == ExtractionSource.OCR_GROUNDED:
-                ocr_texts = []
-                for block_id in processed_block_ids:
-                    if isinstance(block_id, int) and 0 <= block_id < len(ocr_results.text_blocks):
-                        text_block = ocr_results.text_blocks[block_id]
-                        bounding_boxes.append(text_block.bounding_box)
-                        ocr_texts.append(text_block.text)
-                
-                if ocr_texts:
-                    ocr_text_found = " ".join(ocr_texts)
-            
-            # Clean source_text_blocks for enhanced field (only integers)
-            source_text_blocks = []
-            if extraction_source == ExtractionSource.OCR_GROUNDED:
-                source_text_blocks = [bid for bid in processed_block_ids if isinstance(bid, int)]
-            
-            enhanced_field = EnhancedGroundedDataField(
-                field_name=field_name,
-                value=value,
-                confidence=confidence,
-                extraction_source=extraction_source,
-                source_text_blocks=source_text_blocks,
-                bounding_boxes=bounding_boxes,
-                reasoning=reasoning,
-                ocr_text_found=ocr_text_found,
-                visual_description=None  # Could be enhanced later
-            )
-            
-            enhanced_fields.append(enhanced_field)
-        
+
+        def normalize_ids(field_info: Dict[str, Any]) -> List[int]:
+            raw_ids = field_info.get("source_block_ids")
+            if raw_ids is None:
+                raw_single = field_info.get("source_block_id")
+                raw_ids = [raw_single] if raw_single is not None else []
+            ids: List[int] = []
+            for bid in raw_ids:
+                if bid == "visual_only":
+                    return []
+                if isinstance(bid, int):
+                    ids.append(bid)
+                elif isinstance(bid, str) and bid.isdigit():
+                    ids.append(int(bid))
+            return ids
+
+        def walk(prefix: str, node: Any):
+            if is_leaf_mapping(node):
+                field_name = prefix
+                field_info = node
+                value = field_info.get("value")
+                confidence = field_info.get("confidence", 0.0)
+                reasoning = field_info.get("reasoning", "No reasoning provided")
+                normalized_ids = normalize_ids(field_info)
+                normalized_ids = enforce_single_block_if_possible(value, normalized_ids)
+
+                # Determine extraction source based on ids
+                extraction_source = self._determine_extraction_source(normalized_ids)
+
+                # Build bounding boxes and OCR text
+                bounding_boxes: List[BoundingBox] = []
+                ocr_text_found = None
+                if extraction_source == ExtractionSource.OCR_GROUNDED:
+                    ocr_texts: List[str] = []
+                    for block_id in normalized_ids:
+                        if isinstance(block_id, int) and 0 <= block_id < len(ocr_results.text_blocks):
+                            text_block = ocr_results.text_blocks[block_id]
+                            bounding_boxes.append(text_block.bounding_box)
+                            ocr_texts.append(text_block.text)
+                    if ocr_texts:
+                        ocr_text_found = " ".join(ocr_texts)
+
+                source_text_blocks: List[int] = []
+                if extraction_source == ExtractionSource.OCR_GROUNDED:
+                    source_text_blocks = [bid for bid in normalized_ids if isinstance(bid, int)]
+
+                enhanced_fields.append(
+                    EnhancedGroundedDataField(
+                        field_name=field_name,
+                        value=value,
+                        confidence=confidence,
+                        extraction_source=extraction_source,
+                        source_text_blocks=source_text_blocks,
+                        bounding_boxes=bounding_boxes,
+                        reasoning=reasoning,
+                        ocr_text_found=ocr_text_found,
+                        visual_description=None,
+                    )
+                )
+                return
+
+            if isinstance(node, dict):
+                for key, child in node.items():
+                    new_prefix = f"{prefix}.{key}" if prefix else str(key)
+                    walk(new_prefix, child)
+
+        walk("", field_mappings)
         return enhanced_fields
 
     def _determine_extraction_source(self, source_block_ids: List) -> ExtractionSource:

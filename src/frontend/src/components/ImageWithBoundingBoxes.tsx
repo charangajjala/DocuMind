@@ -16,7 +16,7 @@ interface GroundedField {
   field_name: string;
   value: any;
   confidence: number;
-  source_text_blocks: number[];
+  source_text_blocks: number[]; // supports multiple blocks per value
   bounding_boxes: BoundingBox[];
 }
 
@@ -52,6 +52,9 @@ export function ImageWithBoundingBoxes({
   const [imageNaturalSize, setImageNaturalSize] = useState({ width: 0, height: 0 });
   const [zoomLevel, setZoomLevel] = useState(1);
   const [hoveredFieldInternal, setHoveredFieldInternal] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [scrollStart, setScrollStart] = useState({ x: 0, y: 0 });
 
   // Calculate base scale to fit image nicely in viewport
   const baseScale = imageNaturalSize.width > 0 && containerRef.current ? 
@@ -66,10 +69,23 @@ export function ImageWithBoundingBoxes({
   const displayWidth = imageNaturalSize.width * baseScale * zoomLevel;
   const displayHeight = imageNaturalSize.height * baseScale * zoomLevel;
 
+  // Group colors by top-level object/array path to keep related fields visually consistent
+  const normalizeGroupKey = useCallback((fieldName: string) => {
+    // Remove array indexes and take the first segment before a dot
+    const cleaned = fieldName.replace(/\[[^\]]*\]/g, '');
+    return cleaned.split('.')[0] || cleaned;
+  }, []);
+
+  const groupKeyToColor = useRef<Record<string, string>>({});
+
   const getFieldColor = useCallback((fieldName: string) => {
-    const index = groundedFields.findIndex(field => field.field_name === fieldName);
-    return COLORS[index % COLORS.length];
-  }, [groundedFields]);
+    const key = normalizeGroupKey(fieldName);
+    if (!groupKeyToColor.current[key]) {
+      const assignedIndex = Object.keys(groupKeyToColor.current).length;
+      groupKeyToColor.current[key] = COLORS[assignedIndex % COLORS.length];
+    }
+    return groupKeyToColor.current[key];
+  }, [normalizeGroupKey]);
 
   const handleMouseEnter = useCallback((fieldName: string) => {
     setHoveredFieldInternal(fieldName);
@@ -96,13 +112,32 @@ export function ImageWithBoundingBoxes({
     }
   }, []);
 
-  const handleWheel = useCallback((event: React.WheelEvent) => {
-    // Only prevent default if the event is cancelable
-    if (event.cancelable) {
-      event.preventDefault();
+  // Drag-to-pan controls (no wheel zoom)
+  const handleMouseDown = useCallback((event: React.MouseEvent) => {
+    setIsDragging(true);
+    setDragStart({ x: event.clientX, y: event.clientY });
+    if (scrollContainerRef.current) {
+      setScrollStart({
+        x: scrollContainerRef.current.scrollLeft,
+        y: scrollContainerRef.current.scrollTop,
+      });
     }
-    const delta = event.deltaY > 0 ? 0.9 : 1.1;
-    setZoomLevel(prev => Math.min(Math.max(prev * delta, 0.1), 10));
+  }, []);
+
+  const handleMouseMoveContainer = useCallback(
+    (event: React.MouseEvent) => {
+      if (isDragging && scrollContainerRef.current) {
+        const dx = event.clientX - dragStart.x;
+        const dy = event.clientY - dragStart.y;
+        scrollContainerRef.current.scrollLeft = scrollStart.x - dx;
+        scrollContainerRef.current.scrollTop = scrollStart.y - dy;
+      }
+    },
+    [isDragging, dragStart, scrollStart]
+  );
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
   }, []);
 
   // Handle image load
@@ -116,6 +151,18 @@ export function ImageWithBoundingBoxes({
     });
     setImageLoaded(true);
   }, []);
+
+  // Fallback: if dimensions are provided from props, initialize display size and
+  // mark loaded when the hidden image has already completed loading
+  useEffect(() => {
+    if (imageWidth && imageHeight) {
+      setImageNaturalSize({ width: imageWidth, height: imageHeight });
+      const img = imageRef.current;
+      if (img && img.complete) {
+        setImageLoaded(true);
+      }
+    }
+  }, [imageWidth, imageHeight, imageSrc]);
 
   // Canvas drawing function (similar to OCR visualization)
   const drawCanvas = useCallback(() => {
@@ -132,11 +179,10 @@ export function ImageWithBoundingBoxes({
     canvas.style.width = `${displayWidth}px`;
     canvas.style.height = `${displayHeight}px`;
 
-    // Clear and draw image
+    // Clear layer (we render the image with an <img> below the canvas)
     ctx.clearRect(0, 0, displayWidth, displayHeight);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(image, 0, 0, displayWidth, displayHeight);
 
     // Draw bounding boxes for fields that have them
     groundedFields.forEach((field) => {
@@ -145,7 +191,12 @@ export function ImageWithBoundingBoxes({
       }
 
       const color = getFieldColor(field.field_name);
-      const isHovered = hoveredField === field.field_name || hoveredFieldInternal === field.field_name;
+      // Support group hover: hoveredField may be like "group:path.to.object"
+      let isHovered = hoveredField === field.field_name || hoveredFieldInternal === field.field_name;
+      if (!isHovered && hoveredField && hoveredField.startsWith('group:')) {
+        const prefix = hoveredField.slice('group:'.length);
+        isHovered = field.field_name.startsWith(prefix);
+      }
 
       // Debug logging for TM_CODE field
       if (field.field_name === 'TM_CODE') {
@@ -178,7 +229,8 @@ export function ImageWithBoundingBoxes({
         }
 
         // Border with enhanced visibility
-        ctx.strokeStyle = isHovered ? color : color + 'BB';
+        ctx.setLineDash([]);
+        ctx.strokeStyle = color + (isHovered ? 'FF' : 'BB');
         ctx.lineWidth = isHovered ? 3 : 2;
         ctx.setLineDash([]);
         ctx.strokeRect(x, y, width, height);
@@ -346,26 +398,29 @@ export function ImageWithBoundingBoxes({
         </div>
 
         {/* Scrollable Container */}
-        <div 
+        <div
           ref={scrollContainerRef}
-          className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900 rounded-lg"
-          onWheel={handleWheel}
+          className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900 rounded-lg touch-pan-x touch-pan-y overscroll-contain select-none"
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMoveContainer}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          style={{ cursor: isDragging ? 'grabbing' : 'grab', WebkitOverflowScrolling: 'touch' }}
         >
-          <div 
-            ref={containerRef} 
-            className="relative flex items-center justify-center min-h-full p-4"
-          >
-            {/* Hidden image for loading */}
+          <div ref={containerRef} className="p-4" style={{ width: displayWidth + 32, height: displayHeight + 32 }}>
+            {/* Image layer (visible) */}
             <img
               ref={imageRef}
               src={imageSrc}
               alt="Document for field analysis"
-              className="hidden"
               onLoad={handleImageLoad}
+              draggable={false}
+              className="select-none pointer-events-none rounded-lg shadow-lg"
+              style={{ width: displayWidth, height: displayHeight }}
             />
 
             {displayWidth > 0 && imageLoaded && (
-              <div className="relative">
+              <div className="relative" style={{ width: displayWidth, height: displayHeight }}>
                 <canvas
                   ref={canvasRef}
                   onClick={handleCanvasClick}
@@ -373,9 +428,12 @@ export function ImageWithBoundingBoxes({
                   onMouseLeave={() => {
                     handleMouseLeave();
                   }}
-                  className="cursor-crosshair bg-white rounded-lg shadow-lg"
+                  className="absolute top-0 left-0 rounded-lg"
                   style={{
+                    width: displayWidth,
+                    height: displayHeight,
                     imageRendering: zoomLevel > 2 ? 'pixelated' : 'auto',
+                    pointerEvents: isDragging ? 'none' : 'auto',
                   }}
                 />
 

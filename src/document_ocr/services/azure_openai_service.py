@@ -120,6 +120,23 @@ class AzureOpenAIService(LLMProvider):
                 }
             ]
             
+            # Approximate token estimates
+            def _approx_text_tokens(text: str) -> int:
+                # Rough heuristic: 1 token ≈ 4 chars
+                return max(0, (len(text) // 4))
+
+            system_tokens = _approx_text_tokens(system_prompt)
+            user_tokens = _approx_text_tokens(final_user_prompt)
+            # Approximate image tokens using megapixels * factor with a floor
+            image_tokens = 0
+            try:
+                if hasattr(ocr_results, "image_width") and hasattr(ocr_results, "image_height"):
+                    megapixels = (ocr_results.image_width * ocr_results.image_height) / 1_000_000.0
+                    image_tokens = max(100, int(megapixels * 300))
+            except Exception:
+                image_tokens = 100
+            total_estimated_input_tokens = system_tokens + user_tokens + image_tokens
+
             # Make API call
             response = await self.client.chat.completions.create(
                 model=self.deployment,
@@ -141,7 +158,14 @@ class AzureOpenAIService(LLMProvider):
             # Add the prompts used and raw response to the LLM response
             llm_full_response["prompts_used"] = {
                 "system_prompt": system_prompt,
-                "user_prompt": final_user_prompt
+                "user_prompt": final_user_prompt,
+                "token_estimates": {
+                    "system_prompt_tokens": system_tokens,
+                    "user_prompt_tokens": user_tokens,
+                    "image_input_tokens": image_tokens,
+                    "total_estimated_input_tokens": total_estimated_input_tokens,
+                },
+                "subset_block_count": len(ocr_results.text_blocks or []),
             }
             llm_full_response["raw_llm_response"] = raw_llm_response
             
@@ -164,11 +188,13 @@ class AzureOpenAIService(LLMProvider):
     ) -> str:
         """Create system prompt for structured data extraction using modular prompts."""
         
-        # Convert OCR results to a structured format for the LLM
+        # Convert OCR results to a structured format for the LLM.
+        # Use stable original indices when provided to preserve ID consistency.
         ocr_text_blocks = []
         for i, block in enumerate(ocr_results.text_blocks):
+            stable_id = block.original_index if getattr(block, "original_index", None) is not None else i
             ocr_text_blocks.append({
-                "block_id": i,
+                "block_id": stable_id,
                 "text": block.text,
                 "confidence": block.confidence,
                 "element_type": block.element_type,
@@ -201,10 +227,9 @@ class AzureOpenAIService(LLMProvider):
         json_schema: Optional[Dict[str, Any]] = None
     ) -> str:
         """Create user prompt for extraction using modular prompts."""
-        
-        # Start with base extraction prompt
-        base_prompt = get_base_extraction_prompt(user_prompt)
-        
+        # Start with base extraction prompt (now aware of whether schema exists)
+        base_prompt = get_base_extraction_prompt(user_prompt, json_schema)
+
         # Add schema-specific guidance
         if json_schema and 'properties' in json_schema:
             schema_guidance = get_schema_specific_prompt(json_schema['properties'])

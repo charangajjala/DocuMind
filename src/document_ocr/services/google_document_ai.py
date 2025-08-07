@@ -1,5 +1,6 @@
 """Google Document AI OCR service implementation."""
 
+import json
 import time
 from typing import Optional
 from google.cloud import documentai
@@ -10,6 +11,8 @@ from ..models.domain import DocumentOCRResult, TextBlock, BoundingBox
 from ..utils.config import EnvironmentConfigProvider
 from ..utils.image_processor import PILImageProcessor
 from .image_quality_assessment import GoogleImageQualityAssessmentService
+from google.cloud import documentai_v1
+
 
 
 class GoogleDocumentAIOCRService(OCRService):
@@ -109,37 +112,6 @@ class GoogleDocumentAIOCRService(OCRService):
 
             print("Document processed successfully")
 
-            # print('Raw Document AI response:', document)
-            
-            # Convert Document AI response to dict for debugging (serialize the protobuf)
-            raw_response = None
-            try:
-                from google.protobuf.json_format import MessageToDict
-                # Use only supported parameters for protobuf serialization
-                raw_response = MessageToDict(
-                    document, 
-                    preserving_proto_field_name=True
-                )
-            except Exception as e:
-                print(f"Warning: Could not serialize Document AI response: {e}")
-                # Fallback: create a simplified response with key information
-                try:
-                    raw_response = {
-                        "serialization_error": str(e),
-                        "document_text_length": len(document.text) if hasattr(document, 'text') and document.text else 0,
-                        "pages_count": len(document.pages) if hasattr(document, 'pages') and document.pages else 0,
-                        "document_type": str(type(document)),
-                        "has_text": hasattr(document, 'text') and bool(document.text),
-                        "has_pages": hasattr(document, 'pages') and bool(document.pages),
-                        "text_preview": document.text[:200] + "..." if hasattr(document, 'text') and document.text and len(document.text) > 200 else (document.text if hasattr(document, 'text') else "No text")
-                    }
-                except Exception as fallback_error:
-                    raw_response = {
-                        "primary_error": str(e),
-                        "fallback_error": str(fallback_error),
-                        "message": "Could not serialize Document AI response"
-                    }
-            
             # Extract image quality scores using Google's built-in quality assessment
             image_quality = self.quality_service.extract_quality_scores_from_response(
                 document, image_data
@@ -152,7 +124,13 @@ class GoogleDocumentAIOCRService(OCRService):
             full_text = document.text if document.text else ""
             
             processing_time = time.time() - start_time
-            
+
+            print(f'Document table: {document.pages[0].tables}')
+            print(f'Document visual elements: {document.pages[0].visual_elements}')
+            print(f'Document image quality: {document.pages[0].image_quality_scores}')
+            print(f'Document layout: {document.document_layout}')
+
+
             return DocumentOCRResult(
                 full_text=full_text,
                 text_blocks=text_blocks,
@@ -160,7 +138,6 @@ class GoogleDocumentAIOCRService(OCRService):
                 image_height=original_height,
                 processing_time=processing_time,
                 image_quality=image_quality,
-                raw_document_ai_response=raw_response
             )
             
         except Exception as e:

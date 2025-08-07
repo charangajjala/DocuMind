@@ -40,6 +40,8 @@ class TextBlock:
     confidence: float
     bounding_box: BoundingBox
     element_type: str = "block"  # "block", "paragraph", "line", "token"
+    # Preserve the original index from the full OCR list when passing subsets to the LLM
+    original_index: Optional[int] = None
     
     def __str__(self) -> str:
         return f"TextBlock(type={self.element_type}, text='{self.text[:50]}...', confidence={self.confidence:.2f})"
@@ -86,7 +88,6 @@ class DocumentOCRResult:
     image_height: int
     processing_time: float
     image_quality: Optional[ImageQualityScores] = None
-    raw_document_ai_response: Optional[dict] = None  # For debugging
     original_image_info: Optional[dict] = None  # Original image metadata
     
     def get_high_confidence_blocks(self, threshold: float = 0.8) -> List[TextBlock]:
@@ -121,7 +122,7 @@ class OCRResponse(BaseModel):
     error_message: Optional[str] = None
     image_quality: Optional[dict] = None  # Google's image quality scores
     original_image_info: Optional[dict] = None  # Original image metadata
-    raw_document_ai_response: Optional[dict] = None  # For debugging
+
     
     class Config:
         json_schema_extra = {
@@ -317,6 +318,7 @@ class GroundedDataField:
     confidence: float
     source_text_blocks: List[int]  # Indices of OCR text blocks that support this field
     bounding_boxes: List[BoundingBox]  # Corresponding bounding boxes
+    reasoning: Optional[str] = None  # Explanation of extraction decision
     
     def __str__(self) -> str:
         return f"GroundedDataField(field='{self.field_name}', value='{self.value}', confidence={self.confidence:.2f})"
@@ -379,6 +381,7 @@ class StructuredExtractionResponse(BaseModel):
                         "value": "VALUE-001",
                         "confidence": 0.95,
                         "source_text_blocks": [0, 1],
+                        "reasoning": "This field was extracted from the header section of the document. The value 'VALUE-001' matches the expected format and was found in OCR block 0 which contains the complete field value.",
                         "bounding_boxes": [
                             {"x_min": 0.1, "y_min": 0.1, "x_max": 0.3, "y_max": 0.15}
                         ]

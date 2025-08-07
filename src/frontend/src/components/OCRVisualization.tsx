@@ -53,13 +53,20 @@ export function OCRVisualization({
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageNaturalSize, setImageNaturalSize] = useState({ width: 0, height: 0 });
   const [zoomLevel, setZoomLevel] = useState(1);
-  const internalHoveredBlockRef = useRef<number | null>(null);
+  const [internalHoveredBlock, setInternalHoveredBlock] = useState<number | null>(null);
   const mousePositionRef = useRef({ x: 0, y: 0 });
-  const [isDragging] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [scrollStart, setScrollStart] = useState({ x: 0, y: 0 });
+  const [isCanvasActive, setIsCanvasActive] = useState(false);
 
   // Derived state
   const hoveredBlockIndex = hoveredBlock;
-  const hoveredBlockInternal = hoveredBlockIndex !== undefined && hoveredBlockIndex !== null ? hoveredBlockIndex : internalHoveredBlockRef.current;
+  const hoveredBlockInternal = isCanvasActive
+    ? internalHoveredBlock
+    : (hoveredBlockIndex !== undefined && hoveredBlockIndex !== null
+        ? hoveredBlockIndex
+        : internalHoveredBlock);
   const filteredBlocks = textBlocks;
 
   // Calculate base scale to fit image nicely in viewport (around 800px wide max)
@@ -119,11 +126,29 @@ export function OCRVisualization({
     }
   }, []);
 
-  // Mouse wheel zoom
-  const handleWheel = useCallback((event: React.WheelEvent) => {
-    event.preventDefault();
-    const delta = event.deltaY > 0 ? 0.9 : 1.1;
-    setZoomLevel(prev => Math.min(Math.max(prev * delta, 0.1), 10));
+  // Mouse drag panning
+  const handleMouseDown = useCallback((event: React.MouseEvent) => {
+    setIsDragging(true);
+    setDragStart({ x: event.clientX, y: event.clientY });
+    if (scrollContainerRef.current) {
+      setScrollStart({
+        x: scrollContainerRef.current.scrollLeft,
+        y: scrollContainerRef.current.scrollTop
+      });
+    }
+  }, []);
+
+  const handleMouseMove = useCallback((event: React.MouseEvent) => {
+    if (isDragging && scrollContainerRef.current) {
+      const deltaX = event.clientX - dragStart.x;
+      const deltaY = event.clientY - dragStart.y;
+      scrollContainerRef.current.scrollLeft = scrollStart.x - deltaX;
+      scrollContainerRef.current.scrollTop = scrollStart.y - deltaY;
+    }
+  }, [isDragging, dragStart, scrollStart]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
   }, []);
 
   // Drawing function
@@ -184,7 +209,7 @@ export function OCRVisualization({
       ctx.setLineDash([]);
       ctx.strokeRect(x, y, width, height);
     });
-  }, [displayWidth, displayHeight, filteredBlocks, hoveredBlockInternal, imageLoaded, zoomLevel]);
+  }, [displayWidth, displayHeight, filteredBlocks, hoveredBlockInternal, imageLoaded]);
 
   // Handle image load
   const handleImageLoad = useCallback(() => {
@@ -237,36 +262,36 @@ export function OCRVisualization({
   }, [filteredBlocks, getCanvasCoordinates, isDragging, onTextBlockHover]);
 
   const handleCanvasMouseMove = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
+    if (isDragging) return; // Don't process hover during drag
+
     const coords = getCanvasCoordinates(event);
     if (!coords) return;
 
     // Update mouse position ref instantly
     mousePositionRef.current = { x: coords.canvasX, y: coords.canvasY };
 
-    // Only update hover if we're not receiving external hover
-    if (hoveredBlockIndex === undefined || hoveredBlockIndex === null) {
-      let foundBlock = null;
-
-      // Simple hit test
-      for (let i = filteredBlocks.length - 1; i >= 0; i--) {
-        const block = filteredBlocks[i];
-        const bbox = block.bounding_box;
-        if (
-          coords.x >= bbox.x_min && coords.x <= bbox.x_max &&
-          coords.y >= bbox.y_min && coords.y <= bbox.y_max
-        ) {
-          foundBlock = i;
-          break;
-        }
-      }
-
-      // Direct update
-      if (internalHoveredBlockRef.current !== foundBlock) {
-        internalHoveredBlockRef.current = foundBlock;
-        onTextBlockHover?.(foundBlock);
+    // Hit test against blocks
+    let foundBlock: number | null = null;
+    for (let i = filteredBlocks.length - 1; i >= 0; i--) {
+      const block = filteredBlocks[i];
+      const bbox = block.bounding_box;
+      if (
+        coords.x >= bbox.x_min && coords.x <= bbox.x_max &&
+        coords.y >= bbox.y_min && coords.y <= bbox.y_max
+      ) {
+        foundBlock = i;
+        break;
       }
     }
-  }, [filteredBlocks, hoveredBlockIndex, onTextBlockHover, getCanvasCoordinates]);
+
+    // Always update local and external hover state so it never gets stuck
+    if (internalHoveredBlock !== foundBlock) {
+      setInternalHoveredBlock(foundBlock);
+    }
+    if (hoveredBlockIndex !== foundBlock) {
+      onTextBlockHover?.(foundBlock);
+    }
+  }, [filteredBlocks, getCanvasCoordinates, isDragging, internalHoveredBlock, hoveredBlockIndex, onTextBlockHover]);
 
   // Update canvas when dependencies change
   useEffect(() => {
@@ -274,6 +299,20 @@ export function OCRVisualization({
       drawCanvas();
     }
   }, [drawCanvas]);
+
+  // Force redraw when hover state changes
+  useEffect(() => {
+    if (imageLoaded) {
+      drawCanvas();
+    }
+  }, [hoveredBlockInternal, imageLoaded, drawCanvas]);
+
+  // Redraw when canvas hover source toggles
+  useEffect(() => {
+    if (imageLoaded) {
+      drawCanvas();
+    }
+  }, [isCanvasActive, imageLoaded, drawCanvas]);
 
   // Get popup position - relative to canvas container
   const getPopupPosition = () => {
@@ -303,7 +342,7 @@ export function OCRVisualization({
   const popupPosition = getPopupPosition();
 
   return (
-    <div className="h-full flex flex-col space-y-4">
+    <div className="h-full flex flex-col space-y-4 min-w-0">
       {/* Element Type Legend */}
       <div className="flex flex-wrap gap-1 justify-center mb-3 flex-shrink-0">
         {Object.entries(TEXT_ELEMENT_COLORS).map(([type, color]) => (
@@ -325,9 +364,9 @@ export function OCRVisualization({
       </div>
 
       {/* Main Two-Panel Layout */}
-      <div className="flex-1 min-h-0 flex flex-col xl:flex-row gap-6">
+      <div className="flex-1 min-h-0 flex flex-col xl:flex-row gap-6 min-w-0">
         {/* Left Panel - Canvas-based Image (2/3 width) */}
-        <div className="flex-[2] min-h-[500px]">
+        <div className="flex-[2] h-[70vh] min-w-0">
           <Card className="border-0 shadow-lg h-full flex flex-col">
             <CardHeader className="pb-2 flex-shrink-0">
               <CardTitle className="flex items-center justify-between">
@@ -386,23 +425,33 @@ export function OCRVisualization({
                 {/* Main viewport */}
                 <div
                   ref={scrollContainerRef}
-                  className="overflow-auto border rounded-lg bg-muted/20 h-full"
-                  onWheel={handleWheel}
+                  className="overflow-auto border rounded-lg bg-muted/20 h-full w-full touch-pan-x touch-pan-y overscroll-contain select-none"
+                  onMouseDown={handleMouseDown}
+                  onMouseMove={handleMouseMove}
+                  onMouseUp={handleMouseUp}
+                  onMouseLeave={handleMouseUp}
+                  style={{ cursor: isDragging ? 'grabbing' : 'grab', WebkitOverflowScrolling: 'touch' }}
                 >
                   {imageLoaded ? (
-                    <div className="p-4 flex justify-center items-center" style={{ width: 'max-content', height: 'max-content', minWidth: '100%', minHeight: '100%' }}>
-                      <div className="relative">
+                    <div className="p-4" style={{ width: displayWidth + 32, height: displayHeight + 32 }}>
+                      <div className="relative" style={{ width: displayWidth, height: displayHeight }}>
                         <canvas
                           ref={canvasRef}
                           onClick={handleCanvasClick}
                           onMouseMove={handleCanvasMouseMove}
+                          onMouseEnter={() => setIsCanvasActive(true)}
                           onMouseLeave={() => {
-                            internalHoveredBlockRef.current = null;
+                            setIsCanvasActive(false);
+                            setInternalHoveredBlock(null);
                             onTextBlockHover?.(null);
                           }}
-                          className="cursor-crosshair bg-white"
+                          className={isDragging ? "cursor-grabbing bg-white" : "cursor-crosshair bg-white"}
                           style={{
+                            width: displayWidth,
+                            height: displayHeight,
                             imageRendering: zoomLevel > 2 ? 'pixelated' : 'auto',
+                            pointerEvents: isDragging ? 'none' : 'auto',
+                            userSelect: 'none'
                           }}
                         />
 
@@ -478,7 +527,7 @@ export function OCRVisualization({
         </div>
 
         {/* Right Panel - Text Blocks List (1/3 width) */}
-        <div className="flex-[1] min-h-[500px]">
+        <div className="flex-[1] h-[70vh] min-w-0">
           <Card className="border-0 shadow-lg h-full flex flex-col">
             <CardHeader className="pb-2 flex-shrink-0">
               <CardTitle className="flex items-center space-x-2 text-base">
