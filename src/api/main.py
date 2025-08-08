@@ -23,30 +23,53 @@ from document_ocr.core.exceptions import DocumentOCRError, InvalidImageError
 config = EnvironmentConfigProvider()
 processor = DocumentOCRProcessor(config_provider=config)
 
-# Initialize structured extraction components (if Azure OpenAI is configured)
+# Initialize structured extraction components with multi-model support
 structured_extractor = None
+llm_providers = {}
+default_llm_model = 'gpt-5-mini'
 try:
-    azure_api_key = config.get_config('AZURE_OPENAI_API_KEY')
-    azure_endpoint = config.get_config('AZURE_OPENAI_ENDPOINT')
-    azure_deployment = config.get_config('AZURE_OPENAI_DEPLOYMENT_NAME')
-    
-    if azure_api_key and azure_endpoint and azure_deployment:
-        llm_provider = AzureOpenAIService(
-            api_key=azure_api_key,
-            endpoint=azure_endpoint,
-            deployment=azure_deployment
-        )
+    # Discover available model configs
+    available = config.list_available_llm_models(['gpt-40', 'gpt-o4-mini', 'gpt-5-mini', 'gpt-5-nano'])
+    if not available:
+        # Fallback to generic keys
+        azure_api_key = config.get_config('AZURE_OPENAI_API_KEY')
+        azure_endpoint = config.get_config('AZURE_OPENAI_ENDPOINT')
+        azure_deployment = config.get_config('AZURE_OPENAI_DEPLOYMENT_NAME')
+        if azure_api_key and azure_endpoint and azure_deployment:
+            llm_providers[default_llm_model] = AzureOpenAIService(
+                api_key=azure_api_key,
+                endpoint=azure_endpoint,
+                deployment=azure_deployment,
+                api_version=config.get_config('AZURE_OPENAI_API_VERSION', '2025-01-01-preview')
+            )
+    else:
+        for model_key, cfg in available.items():
+            try:
+                llm_providers[model_key] = AzureOpenAIService(
+                    api_key=cfg['api_key'],
+                    endpoint=cfg['endpoint'],
+                    deployment=cfg['deployment'],
+                    api_version=cfg.get('api_version') or '2025-01-01-preview'
+                )
+            except Exception as e:
+                print(f"⚠️ Failed to init provider for {model_key}: {e}")
+
+    if llm_providers:
+        # Choose default model
+        if default_llm_model not in llm_providers:
+            default_llm_model = next(iter(llm_providers.keys()))
         schema_validator = JSONSchemaValidator()
+        # Initialize extractor with any provider as default; we'll override per request
         structured_extractor = VisuallyGroundedExtractor(
             document_processor=processor,
-            llm_provider=llm_provider,
+            llm_provider=llm_providers[default_llm_model],
             schema_validator=schema_validator
         )
-        print("✅ Azure OpenAI structured extraction initialized successfully")
+        print(f"✅ Azure OpenAI structured extraction initialized. Models: {list(llm_providers.keys())}, default='{default_llm_model}'")
     else:
         print("⚠️ Azure OpenAI not configured - structured extraction unavailable")
 except Exception as e:
-    print(f"⚠️ Failed to initialize Azure OpenAI: {e}")
+    print(f"⚠️ Failed to initialize Azure OpenAI multi-model setup: {e}")
     structured_extractor = None
 
 # Configuration updated to use 2025-01-01-preview API version
@@ -293,13 +316,20 @@ async def extract_structured_data(request: StructuredExtractionRequest):
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid base64 image data")
         
-        # Extract structured data
+        # Select LLM provider based on requested model (if provided)
+        requested_model = (request.llm_model or default_llm_model).strip().lower()
+        provider = llm_providers.get(requested_model) or llm_providers.get(default_llm_model)
+        if provider is None:
+            raise HTTPException(status_code=503, detail="No LLM providers are configured on the server")
+
+        # Extract structured data (override the provider per request)
         result = await structured_extractor.extract_with_visual_grounding(
             image_data=image_data,
             mime_type="image/jpeg",
             json_schema=request.json_schema,
             user_prompt=request.user_prompt,
-            document_type=request.document_type
+            document_type=request.document_type,
+            llm_provider_override=provider
         )
         
         # Convert OCR results to API format

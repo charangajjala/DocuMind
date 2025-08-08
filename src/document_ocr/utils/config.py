@@ -65,6 +65,31 @@ class EnvironmentConfigProvider(ConfigurationProvider):
             'MAX_IMAGE_WIDTH': int(os.getenv('MAX_IMAGE_WIDTH', '4096')),
             'MAX_IMAGE_HEIGHT': int(os.getenv('MAX_IMAGE_HEIGHT', '4096')),
             'ENHANCE_IMAGE': os.getenv('ENHANCE_IMAGE', 'false').lower() == 'true',
+            # Optional model-specific Azure OpenAI configs (per-model overrides)
+            # Example expected keys:
+            #  AZURE_OPENAI_API_KEY_GPT_40, AZURE_OPENAI_ENDPOINT_GPT_40, AZURE_OPENAI_DEPLOYMENT_NAME_GPT_40
+            #  AZURE_OPENAI_API_KEY_GPT_O4_MINI, ...
+            #  AZURE_OPENAI_API_KEY_GPT_5_MINI, ...
+            #  AZURE_OPENAI_API_KEY_GPT_5_NANO, ...
+            'AZURE_OPENAI_API_KEY_GPT_40': os.getenv('AZURE_OPENAI_API_KEY_GPT_40'),
+            'AZURE_OPENAI_ENDPOINT_GPT_40': os.getenv('AZURE_OPENAI_ENDPOINT_GPT_40'),
+            'AZURE_OPENAI_DEPLOYMENT_NAME_GPT_40': os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME_GPT_40'),
+            'AZURE_OPENAI_API_VERSION_GPT_40': os.getenv('AZURE_OPENAI_API_VERSION_GPT_40'),
+
+            'AZURE_OPENAI_API_KEY_GPT_O4_MINI': os.getenv('AZURE_OPENAI_API_KEY_GPT_O4_MINI'),
+            'AZURE_OPENAI_ENDPOINT_GPT_O4_MINI': os.getenv('AZURE_OPENAI_ENDPOINT_GPT_O4_MINI'),
+            'AZURE_OPENAI_DEPLOYMENT_NAME_GPT_O4_MINI': os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME_GPT_O4_MINI'),
+            'AZURE_OPENAI_API_VERSION_GPT_O4_MINI': os.getenv('AZURE_OPENAI_API_VERSION_GPT_O4_MINI'),
+
+            'AZURE_OPENAI_API_KEY_GPT_5_MINI': os.getenv('AZURE_OPENAI_API_KEY_GPT_5_MINI'),
+            'AZURE_OPENAI_ENDPOINT_GPT_5_MINI': os.getenv('AZURE_OPENAI_ENDPOINT_GPT_5_MINI'),
+            'AZURE_OPENAI_DEPLOYMENT_NAME_GPT_5_MINI': os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME_GPT_5_MINI'),
+            'AZURE_OPENAI_API_VERSION_GPT_5_MINI': os.getenv('AZURE_OPENAI_API_VERSION_GPT_5_MINI'),
+
+            'AZURE_OPENAI_API_KEY_GPT_5_NANO': os.getenv('AZURE_OPENAI_API_KEY_GPT_5_NANO'),
+            'AZURE_OPENAI_ENDPOINT_GPT_5_NANO': os.getenv('AZURE_OPENAI_ENDPOINT_GPT_5_NANO'),
+            'AZURE_OPENAI_DEPLOYMENT_NAME_GPT_5_NANO': os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME_GPT_5_NANO'),
+            'AZURE_OPENAI_API_VERSION_GPT_5_NANO': os.getenv('AZURE_OPENAI_API_VERSION_GPT_5_NANO'),
         }
         
         # Load from config file if specified and dotenv not available
@@ -101,6 +126,40 @@ class EnvironmentConfigProvider(ConfigurationProvider):
     def get_all_config(self) -> Dict[str, Any]:
         """Get all configuration values."""
         return self._config_cache.copy()
+
+    # --- LLM model helpers ---
+    def _normalize_model_key(self, model_key: str) -> str:
+        # Convert 'gpt-4o' -> 'GPT_4O', 'gpt-o4-mini' -> 'GPT_O4_MINI', 'gpt-5-nano' -> 'GPT_5_NANO'
+        return model_key.upper().replace('-', '_')
+
+    def get_llm_model_config(self, model_key: str) -> Dict[str, Any]:
+        """Return Azure OpenAI config for a specific model key, falling back to global keys.
+
+        Expected env keys for a given model suffix S:
+          AZURE_OPENAI_API_KEY_S, AZURE_OPENAI_ENDPOINT_S, AZURE_OPENAI_DEPLOYMENT_NAME_S, AZURE_OPENAI_API_VERSION_S
+        """
+        suffix = self._normalize_model_key(model_key)
+        api_key = self.get_config(f'AZURE_OPENAI_API_KEY_{suffix}') or self.get_config('AZURE_OPENAI_API_KEY')
+        endpoint = self.get_config(f'AZURE_OPENAI_ENDPOINT_{suffix}') or self.get_config('AZURE_OPENAI_ENDPOINT')
+        deployment = self.get_config(f'AZURE_OPENAI_DEPLOYMENT_NAME_{suffix}') or self.get_config('AZURE_OPENAI_DEPLOYMENT_NAME')
+        api_version = self.get_config(f'AZURE_OPENAI_API_VERSION_{suffix}') or self.get_config('AZURE_OPENAI_API_VERSION', '2025-01-01-preview')
+        return {
+            'api_key': api_key,
+            'endpoint': endpoint,
+            'deployment': deployment,
+            'api_version': api_version,
+        }
+
+    def list_available_llm_models(self, candidates: Optional[list] = None) -> Dict[str, Dict[str, Any]]:
+        """Return a mapping of model_key -> config for all candidates that are fully configured."""
+        if candidates is None:
+            candidates = ['gpt-40', 'gpt-o4-mini', 'gpt-5-mini', 'gpt-5-nano']
+        available: Dict[str, Dict[str, Any]] = {}
+        for key in candidates:
+            cfg = self.get_llm_model_config(key)
+            if cfg.get('api_key') and cfg.get('endpoint') and cfg.get('deployment'):
+                available[key] = cfg
+        return available
     
     def validate_required_config(self) -> None:
         """Validate that all required configuration is present."""

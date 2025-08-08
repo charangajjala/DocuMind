@@ -109,29 +109,13 @@ CONFIDENCE SCORING:
 • Higher confidence when both visual and OCR agree
 • Lower confidence for visual-only or unclear extractions
 
-REASONING REQUIREMENTS:
-For each field extraction, provide comprehensive reasoning that explains:
+REASONING REQUIREMENTS (COMPACT):
+Provide concise reasoning for each field using 2–4 short bullets total (max ~80 words). Cover these components once per field:
 
-1. SEMANTIC MATCHING: Why does this extracted value logically match the requested field?
-   - What makes this value appropriate for this field type?
-   - How does the context around the value support this interpretation?
-   - Any semantic validation performed (format, data type, expected patterns)
-
-2. LOCATION IDENTIFICATION: Where was this value found in the document?
-   - Visual location description (e.g., "top-right corner", "header section", "table cell 2")
-   - OCR text block reference if applicable
-   - Surrounding context or labels that helped identify it
-
-3. BLOCK SELECTION LOGIC: Why was this specific OCR block chosen?
-   - Which block level was selected (Token/Line/Paragraph/Block) and why
-   - Why this block contains the complete value without extra text
-   - How it compares to other potential blocks (more/less specific)
-
-4. CONFIDENCE FACTORS: What affects the confidence score?
-   - Visual clarity of the text/value
-   - OCR recognition quality
-   - Ambiguity or alternative interpretations
-   - Supporting context or visual/OCR clues
+- Semantic: why the value matches the field definition/pattern
+- Location: page region/table/section + key nearby label/anchor
+- Block: chosen Token/Line/Paragraph/Block and why it contains the complete value
+- Confidence: visual clarity + OCR agreement (or visual_only justification)
 """
 
     # Add strict mapping key format requirements for nested fields (ALWAYS include these rules)
@@ -208,14 +192,13 @@ EXAMPLE RESPONSE SHAPE (COMPACT):
 }
 ```
 
-REQUEST FOR DEEPER REASONING (MANDATORY):
-• Provide ONE array-level reasoning per primitive array (e.g., "tags") and per array field type (e.g., "items[].sku", "items[].qty", "items[].price").
-• For each reasoning, expand on:
-  - Semantic matching: why the content matches the field definition/pattern
-  - Location: page region/table/section + quote nearby OCR text that anchored the decision
-  - Block selection: why the chosen Token/Line/Paragraph/Block contains the complete value
-  - Confidence factors: visual clarity, OCR agreement, consistent formatting, label alignment
-• If reasoning is brief, expand with 1–2 concrete visual/OCR cues (labels, headers, alignment, formatting).
+COMPACT REASONING FORMAT (MANDATORY):
+• Provide ONE array-level reasoning per primitive array (e.g., "tags") and per array field type (e.g., "items[].sku", "items[].qty", "items[].price"). Keep each reasoning compact: 2–4 bullets (≤ ~80 words).
+• Use this template (phrases are sufficient):
+  - Semantic: why it matches schema/pattern
+  - Location: region/table/section + key nearby label/anchor
+  - Block: Token/Line/Paragraph/Block and why it is complete
+  - Confidence: visual clarity + OCR agreement (or visual_only)
 • Do NOT repeat identical reasoning per array index; keep it once at array/group level. Use per-index reasoning only for exceptions.
 """
 

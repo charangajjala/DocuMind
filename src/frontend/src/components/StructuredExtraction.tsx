@@ -18,6 +18,7 @@ import {
   Download,
   BarChart3
 } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface StructuredExtractionProps {
   imageData: string; // base64 encoded image
@@ -34,6 +35,7 @@ export function StructuredExtraction({
   const [result, setResult] = useState<ExtractionResult | null>(null);
   const [userPrompt, setUserPrompt] = useState('');
   const [selectedField, setSelectedField] = useState<string | null>(null);
+  const [llmModel, setLlmModel] = useState<'gpt-40' | 'gpt-o4-mini' | 'gpt-5-mini' | 'gpt-5-nano'>('gpt-5-mini');
 
   const extractStructuredData = useCallback(async () => {
     // Validate that at least one of schema or prompt is provided
@@ -62,7 +64,8 @@ export function StructuredExtraction({
       const extractionResult = await ApiService.extractStructuredData(
         imageData, 
         schema, 
-        userPrompt || undefined
+        userPrompt || undefined,
+        llmModel
       );
       setResult(extractionResult);
       onExtractionComplete(extractionResult);
@@ -83,7 +86,7 @@ export function StructuredExtraction({
     } finally {
       setIsExtracting(false);
     }
-  }, [imageData, schema, userPrompt, onExtractionComplete]);
+  }, [imageData, schema, userPrompt, onExtractionComplete, llmModel]);
 
   const exportResults = () => {
     if (!result) return;
@@ -239,6 +242,20 @@ export function StructuredExtraction({
           </div>
 
           <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <label className="text-sm font-medium">Model</label>
+              <Select value={llmModel} onValueChange={(v) => setLlmModel(v as any)}>
+                <SelectTrigger className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="gpt-40">gpt-40</SelectItem>
+                  <SelectItem value="gpt-o4-mini">gpt-o4-mini</SelectItem>
+                  <SelectItem value="gpt-5-mini">gpt-5-mini</SelectItem>
+                  <SelectItem value="gpt-5-nano">gpt-5-nano</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <Button
               onClick={extractStructuredData}
               disabled={isExtracting || !imageData || (!schema && !userPrompt.trim())}

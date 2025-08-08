@@ -49,9 +49,7 @@ async def test_azure_deployments():
             
             response = await client.chat.completions.create(
                 model=deployment,
-                messages=[{"role": "user", "content": "Hello"}],
-                max_tokens=5,
-                temperature=0
+                messages=[{"role": "user", "content": "Hello"}]
             )
             
             print(f"✅ {deployment} - WORKS! Response: {response.choices[0].message.content.strip()}")
