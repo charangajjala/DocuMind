@@ -132,7 +132,12 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
                 errors.append("Extracted data does not match the provided JSON schema")
             
             processing_time = time.time() - start_time
-            llm_confidence = llm_response.get("overall_confidence", 0.0)
+            # Compute overall confidence as average of per-field confidences (ignore None/NaN)
+            field_confidences: List[float] = [
+                float(f.confidence) for f in grounded_fields
+                if isinstance(getattr(f, 'confidence', None), (int, float))
+            ]
+            llm_confidence = sum(field_confidences) / len(field_confidences) if field_confidences else 0.0
             prompts_used = llm_response.get("prompts_used", {})
             raw_llm_response = llm_response.get("raw_llm_response", None)
             
@@ -272,6 +277,48 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
             
             raise StructuredExtractionError(f"Enhanced structured extraction failed: {e}")
 
+    def _expand_array_mappings(
+        self,
+        field_mappings: Dict[str, Any],
+        extracted_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Expand array-level mappings to individual indexed mappings."""
+        expanded_mappings = {}
+        
+        # First, copy all non-array mappings and reasoning-only entries
+        for key, mapping in field_mappings.items():
+            if isinstance(mapping, dict):
+                if "value" in mapping and isinstance(mapping["value"], list):
+                    # This is an array-level mapping - expand it
+                    array_values = mapping["value"]
+                    array_source_blocks = mapping.get("source_block_id", [])
+                    array_confidence = mapping.get("confidence", 0.0)
+                    array_reasoning = mapping.get("reasoning")
+                    
+                    # Ensure source_block_ids is a list
+                    if not isinstance(array_source_blocks, list):
+                        array_source_blocks = [array_source_blocks] if array_source_blocks is not None else []
+                    
+                    # Add reasoning-only entry for the array
+                    if array_reasoning:
+                        expanded_mappings[key] = {"reasoning": array_reasoning}
+                    
+                    # Create individual indexed mappings
+                    for i, value in enumerate(array_values):
+                        indexed_key = f"{key}[{i}]"
+                        source_block_id = array_source_blocks[i] if i < len(array_source_blocks) else "visual_only"
+                        
+                        expanded_mappings[indexed_key] = {
+                            "value": value,
+                            "confidence": array_confidence,
+                            "source_block_id": source_block_id
+                        }
+                else:
+                    # Regular mapping or reasoning-only entry
+                    expanded_mappings[key] = mapping
+        
+        return expanded_mappings
+
     def _process_field_mappings(
         self,
         llm_response: Dict[str, Any],
@@ -280,6 +327,12 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
         """Process LLM field mappings into grounded data fields."""
         grounded_fields: List[GroundedDataField] = []
         field_mappings = llm_response.get("field_mappings", {})
+        extracted_data = llm_response.get("extracted_data", {})
+        
+        # Convert array-level mappings to individual indexed mappings
+        logger.info(f"Original field_mappings keys: {list(field_mappings.keys())}")
+        field_mappings = self._expand_array_mappings(field_mappings, extracted_data)
+        logger.info(f"Expanded field_mappings keys: {list(field_mappings.keys())}")
 
         def is_leaf_mapping(node: Any) -> bool:
             return isinstance(node, dict) and (
@@ -351,20 +404,43 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
             return ids
 
         def walk(prefix: str, node: Any):
+            # Include array-level reasoning-only entries as separate fields
+            if isinstance(node, dict) and "reasoning" in node and "value" not in node:
+                grounded_fields.append(
+                    GroundedDataField(
+                        field_name=prefix,
+                        value=None,
+                        confidence=0.0,
+                        source_text_blocks=[],
+                        bounding_boxes=[],
+                        reasoning=node.get("reasoning"),
+                    )
+                )
+                return
+
             if is_leaf_mapping(node):
                 field_name = prefix
                 field_info = node
                 value = field_info.get("value")
                 confidence = field_info.get("confidence", 0.0)
-                reasoning = field_info.get("reasoning", "No reasoning provided")
+                reasoning = field_info.get("reasoning")
+                
                 source_block_ids = normalize_ids(field_info)
                 source_block_ids = enforce_single_block_if_possible(value, source_block_ids)
 
                 # Build bounding boxes from normalized ids
                 bounding_boxes: List[BoundingBox] = []
+                ocr_confs: List[float] = []
                 for block_id in source_block_ids:
                     if isinstance(block_id, int) and 0 <= block_id < len(ocr_results.text_blocks):
-                        bounding_boxes.append(ocr_results.text_blocks[block_id].bounding_box)
+                        tb = ocr_results.text_blocks[block_id]
+                        bounding_boxes.append(tb.bounding_box)
+                        if isinstance(getattr(tb, 'confidence', None), (int, float)):
+                            ocr_confs.append(float(tb.confidence))
+
+                # If OCR confidences available, set field confidence to their average
+                if ocr_confs:
+                    confidence = sum(ocr_confs) / len(ocr_confs)
 
                 grounded_fields.append(
                     GroundedDataField(
@@ -399,6 +475,10 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
         """Process LLM field mappings into enhanced grounded data fields."""
         enhanced_fields = []
         field_mappings = llm_response.get("field_mappings", {})
+        extracted_data = llm_response.get("extracted_data", {})
+        
+        # Convert array-level mappings to individual indexed mappings
+        field_mappings = self._expand_array_mappings(field_mappings, extracted_data)
 
         def is_leaf_mapping(node: Any) -> bool:
             return isinstance(node, dict) and (
@@ -420,13 +500,39 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
                     ids.append(int(bid))
             return ids
 
+        def find_array_reasoning(field_name: str) -> Optional[str]:
+            """Find array-level reasoning for individual array elements.
+            Returns None if not found (to avoid duplicating placeholder text).
+            """
+            if '[' in field_name and ']' in field_name:
+                # For items[0].sku, look for items[].sku reasoning
+                base_pattern = field_name.replace(field_name[field_name.find('['):field_name.find(']')+1], '[]')
+                if base_pattern in field_mappings and isinstance(field_mappings[base_pattern], dict):
+                    array_reasoning = field_mappings[base_pattern].get('reasoning')
+                    if array_reasoning:
+                        return array_reasoning
+                # For tags[0], look for tags reasoning  
+                array_name = field_name.split('[')[0]
+                if array_name in field_mappings and isinstance(field_mappings[array_name], dict):
+                    array_reasoning = field_mappings[array_name].get('reasoning')
+                    if array_reasoning:
+                        return array_reasoning
+            return None
+
         def walk(prefix: str, node: Any):
             if is_leaf_mapping(node):
                 field_name = prefix
                 field_info = node
                 value = field_info.get("value")
                 confidence = field_info.get("confidence", 0.0)
-                reasoning = field_info.get("reasoning", "No reasoning provided")
+                reasoning = field_info.get("reasoning")
+                if reasoning is None:
+                    reasoning = find_array_reasoning(field_name)
+                
+                # If no direct reasoning, try to find array-level reasoning
+                if not reasoning:
+                    reasoning = find_array_reasoning(field_name)
+                
                 normalized_ids = normalize_ids(field_info)
                 normalized_ids = enforce_single_block_if_possible(value, normalized_ids)
 

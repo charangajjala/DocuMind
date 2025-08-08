@@ -40,6 +40,11 @@ AVAILABLE RESOURCES:
 • OCR Text Blocks (with positions and hierarchy):
 {json.dumps(ocr_text_blocks, indent=2)}
 
+VISUAL INTELLIGENCE (MANDATORY):
+• Do NOT blindly rely on OCR text. Use visual layout, structure, and content (tables, columns, headers, badges, icons, alignment) to guide extraction.
+• Reconcile discrepancies by considering labels, column headers, grouping, typography, and spatial proximity. Explain decisions in reasoning.
+• Use OCR block IDs for grounding only when the visual content truly corresponds; otherwise use "visual_only".
+
 OCR BLOCK HIERARCHY EXPLANATION:
 The OCR text blocks follow a hierarchical structure from largest to smallest:
 1. Block - Largest cohesive region of text with shared orientation (multiple paragraphs)
@@ -54,6 +59,11 @@ For each extracted field, you must specify the MOST SPECIFIC (smallest) OCR bloc
 • If a field value spans multiple lines → select the Paragraph block ID
 • If a field value spans multiple paragraphs → select the Block block ID
 • If no OCR block contains the value → use "visual_only"
+
+CONFIDENCE POLICY:
+• For OCR-grounded values, the per-field confidence should reflect OCR block confidence(s).
+• For visual_only values, provide an LLM per-field confidence based on visual clarity and layout.
+• Do NOT compute or return an overall confidence; only per-field confidences are required.
 
 CRITICAL: Always choose the SMALLEST block level that can contain the ENTIRE field value. This provides the most precise bounding boxes for visual grounding.
 

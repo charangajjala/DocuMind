@@ -68,6 +68,9 @@ export function ImprovedOCRApp() {
     setStructuredResults(null);
     setFullPromptsUsed(null);
     setRawLlmResponse(null);
+    // Reset schema and clear persisted schema on new file upload
+    try { localStorage.removeItem('enhanced_schema_builder_current_schema'); } catch {}
+    setSchema(null);
     setSchema(null); // Reset schema for a fresh run on new image
     setActiveTab('upload');
 
@@ -449,6 +452,7 @@ export function ImprovedOCRApp() {
             <TabsContent value="extraction" className="space-y-6">
               <div className="max-w-6xl mx-auto space-y-6">
                 <EnhancedSchemaBuilder
+                  initialSchema={schema || undefined}
                   onSchemaChange={setSchema}
                 />
                 

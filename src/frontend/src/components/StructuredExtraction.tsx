@@ -7,6 +7,7 @@ import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ApiService } from '@/services/api';
+import type { ExtractionResult, GroundedField } from '@/types/extraction';
 import { 
   Brain, 
   CheckCircle2, 
@@ -22,34 +23,6 @@ interface StructuredExtractionProps {
   imageData: string; // base64 encoded image
   schema?: any; // Optional schema
   onExtractionComplete: (result: any) => void;
-}
-
-interface ExtractionResult {
-  success: boolean;
-  extracted_data: any;
-  grounded_fields: Array<{
-    field_name: string;
-    value: any;
-    confidence: number;
-    source_text_blocks: number[];
-    reasoning?: string;
-    extraction_source?: string;
-    ocr_text_found?: string;
-    visual_description?: string;
-    bounding_boxes: Array<{
-      x_min: number;
-      y_min: number;
-      x_max: number;
-      y_max: number;
-    }>;
-  }>;
-  ocr_results: any;
-  processing_time: number;
-  llm_confidence: number;
-  schema_validation_passed: boolean;
-  errors: string[];
-  error_message?: string;
-  raw_llm_response?: string; // Raw response from LLM before post-processing
 }
 
 export function StructuredExtraction({ 

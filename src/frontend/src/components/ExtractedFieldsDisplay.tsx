@@ -91,8 +91,34 @@ export function ExtractedFieldsDisplay({
     return {
       confidence: gf.confidence as number,
       regions: (gf.bounding_boxes?.length || 0) as number,
-      hasReasoning: !!gf.reasoning
+      hasReasoning: !!gf.reasoning,
+      reasoning: gf.reasoning as string | undefined
     };
+  };
+
+  // Try to resolve reasoning for a path with fallbacks to array-level patterns
+  const getReasoningForPath = (path: string): string | null => {
+    // 1) Exact match
+    const exact = grounded_fields?.find((g: any) => g.field_name === path && g.reasoning);
+    if (exact?.reasoning) return exact.reasoning as string;
+
+    // 2) Array index → array[] field type (e.g., items[0].sku → items[].sku)
+    if (path.includes("[")) {
+      const replaced = path.replace(/\[[^\]]*\]/, "[]");
+      const typed = grounded_fields?.find((g: any) => g.field_name === replaced && g.reasoning);
+      if (typed?.reasoning) return typed.reasoning as string;
+
+      // 3) Primitive array element → array container (e.g., tags[0] → tags)
+      const baseArray = path.split("[")[0];
+      const base = grounded_fields?.find((g: any) => g.field_name === baseArray && g.reasoning);
+      if (base?.reasoning) return base.reasoning as string;
+    }
+
+    // 4) Object field container (e.g., items → has reasoning-only GF)
+    const container = grounded_fields?.find((g: any) => g.field_name === path && g.reasoning && !("value" in g));
+    if (container?.reasoning) return container.reasoning as string;
+
+    return null;
   };
 
   const toggleCollapse = (path: string) => {
@@ -113,6 +139,7 @@ export function ExtractedFieldsDisplay({
     const isCollapsed = collapsedPaths.has(path);
     const type = Array.isArray(value) ? 'array' : (value !== null && typeof value === 'object' ? 'object' : typeof value);
     const valuePreview = !isContainer ? String(value) : (Array.isArray(value) ? `[${(value as any[]).length}]` : `{${Object.keys(value || {}).length}}`);
+    const reasoningText = getReasoningForPath(path);
 
     return (
       <div
@@ -150,6 +177,23 @@ export function ExtractedFieldsDisplay({
           <Badge variant="outline" className="text-[10px] px-1 py-0 capitalize">{type}</Badge>
           {!isContainer && (
             <span className="text-xs text-muted-foreground truncate max-w-[240px]" title={valuePreview}>= {valuePreview}</span>
+          )}
+          {reasoningText && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 w-5 p-0"
+                  aria-label="Show reasoning"
+                >
+                  <Brain className="h-3 w-3 text-purple-600" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs whitespace-pre-wrap break-words">
+                <p className="text-[11px] leading-snug">{reasoningText}</p>
+              </TooltipContent>
+            </Tooltip>
           )}
         </div>
 

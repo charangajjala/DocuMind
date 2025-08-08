@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -36,50 +36,62 @@ interface SchemaBuilderProps {
   initialSchema?: any;
 }
 
-// Removed persistent storage key and persistence
+const LS_KEY = 'enhanced_schema_builder_current_schema';
 
 export const EnhancedSchemaBuilder: React.FC<SchemaBuilderProps> = ({ 
   onSchemaChange,
   initialSchema
 }) => {
   const [fields, setFields] = useState<ComplexField[]>([]);
+  // Editable JSON preview state
+  const [jsonText, setJsonText] = useState<string>('');
+  const [jsonError, setJsonError] = useState<string | null>(null);
+  const jsonUpdateFromFieldsRef = useRef(false);
+  const jsonDebounceRef = useRef<number | null>(null);
 
-  // Load initial schema (if provided) on mount/prop change
+  // Initialize once: prefer initialSchema, else localStorage, else empty
+  const didInitRef = useRef(false);
   useEffect(() => {
+    if (didInitRef.current) return;
+    didInitRef.current = true;
     try {
       if (initialSchema && initialSchema.properties) {
         const fieldsFromSchema = convertSchemaToFields(initialSchema);
         setFields(fieldsFromSchema);
-        if (onSchemaChange) {
-          const schema = generateJsonSchemaFromFields(fieldsFromSchema);
-          onSchemaChange(schema);
-        }
+        // Important: do NOT call onSchemaChange here to avoid update loops
       } else {
-        setFields([]);
-        if (onSchemaChange) {
-          onSchemaChange(generateJsonSchemaFromFields([]));
+        const cached = localStorage.getItem(LS_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed && parsed.properties) {
+            const fieldsFromSchema = convertSchemaToFields(parsed);
+            setFields(fieldsFromSchema);
+            return;
+          }
         }
+        setFields([]);
       }
     } catch (error) {
       console.error('Error initializing schema:', error);
       setFields([]);
     }
-  }, [onSchemaChange, initialSchema]);
+  }, [initialSchema]);
 
   // Generate unique ID
   const generateId = () => Math.random().toString(36).substr(2, 9);
 
-  // Update fields and notify parent (no persistence)
+  // Update fields and notify parent (with persistence)
   const updateFields = useCallback((newFields: ComplexField[]) => {
     setFields(newFields);
-    if (onSchemaChange) {
-      const schema = generateJsonSchemaFromFields(newFields);
-      onSchemaChange(schema);
-    }
+    const schema = generateJsonSchemaFromFields(newFields);
+    try { localStorage.setItem(LS_KEY, JSON.stringify(schema)); } catch {}
+    // Defer notifying parent to end of tick to avoid nested updates during render
+    if (onSchemaChange) { setTimeout(() => onSchemaChange(schema), 0); }
   }, [onSchemaChange]);
 
   // Add new field
   const addField = (fieldType: ComplexField['type'] = 'string') => {
+    console.log('[SchemaBuilder] Add field clicked', fieldType);
     const newField: ComplexField = {
       id: generateId(),
       name: '',
@@ -102,6 +114,7 @@ export const EnhancedSchemaBuilder: React.FC<SchemaBuilderProps> = ({
     }
 
     const newFields = [...fields, newField];
+    console.log('[SchemaBuilder] New fields length:', newFields.length);
     updateFields(newFields);
   };
 
@@ -209,7 +222,7 @@ export const EnhancedSchemaBuilder: React.FC<SchemaBuilderProps> = ({
 
   // Add field to object
   const addFieldToObject = (fieldIndex: number, path: string, fieldType: ComplexField['type'] = 'string') => {
-    console.log('Adding field to object:', { fieldIndex, path, fieldType });
+    console.log('[SchemaBuilder] Add child field', { fieldIndex, path, fieldType });
     const targetField = findFieldByPath(fieldIndex, path);
     if (!targetField || targetField.type !== 'object') {
       console.log('Target field not found or not an object:', targetField);
@@ -243,7 +256,7 @@ export const EnhancedSchemaBuilder: React.FC<SchemaBuilderProps> = ({
     // Use a temporary key since name is empty initially
     const tempKey = `temp_${newFieldId}`;
     targetField.properties[tempKey] = newField;
-    console.log('Added field with temp key:', tempKey, newField);
+    console.log('[SchemaBuilder] Added field with temp key:', tempKey);
     updateFields([...fields]);
   };
 
@@ -398,7 +411,8 @@ export const EnhancedSchemaBuilder: React.FC<SchemaBuilderProps> = ({
 
           {/* Add children button for objects */}
           {field.type === 'object' && (
-            <Button
+          <Button
+            type="button"
               variant="ghost"
               size="sm"
               onClick={() => addFieldToObject(fieldIndex, currentPath, 'string')}
@@ -410,6 +424,7 @@ export const EnhancedSchemaBuilder: React.FC<SchemaBuilderProps> = ({
 
           {/* Delete button */}
           <Button
+            type="button"
             variant="ghost"
             size="sm"
             onClick={() => {
@@ -516,6 +531,67 @@ export const EnhancedSchemaBuilder: React.FC<SchemaBuilderProps> = ({
     return JSON.stringify(schema, null, 2);
   };
 
+  // Keep JSON preview in sync when fields change (one-way: fields -> jsonText)
+  useEffect(() => {
+    const pretty = generatePreview();
+    jsonUpdateFromFieldsRef.current = true;
+    setJsonText(pretty);
+    setJsonError(null);
+    // Release the guard after this tick so user edits are recognized
+    const id = setTimeout(() => { jsonUpdateFromFieldsRef.current = false; }, 0);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fields]);
+
+  // Handle edits to JSON preview (two-way: jsonText -> fields)
+  const handleJsonChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    setJsonText(value);
+    setJsonError(null);
+
+    if (jsonUpdateFromFieldsRef.current) {
+      // Ignore programmatic updates sourced from fields
+      return;
+    }
+
+    if (jsonDebounceRef.current) {
+      window.clearTimeout(jsonDebounceRef.current);
+    }
+
+    jsonDebounceRef.current = window.setTimeout(() => {
+      try {
+        const parsed = JSON.parse(value);
+        if (!parsed || typeof parsed !== 'object') {
+          setJsonError('JSON must be an object schema.');
+          return;
+        }
+        if (!('properties' in parsed)) {
+          setJsonError("Schema must contain a top-level 'properties' object.");
+          return;
+        }
+
+        const fieldsFromSchema = convertSchemaToFields(parsed);
+        updateFields(fieldsFromSchema);
+        setJsonError(null);
+      } catch (err: any) {
+        setJsonError(err?.message || 'Invalid JSON');
+      }
+    }, 400);
+  };
+
+  const handleJsonBlur = () => {
+    // On blur, try to pretty-print if valid
+    try {
+      const parsed = JSON.parse(jsonText);
+      const pretty = JSON.stringify(parsed, null, 2);
+      jsonUpdateFromFieldsRef.current = true;
+      setJsonText(pretty);
+      setTimeout(() => { jsonUpdateFromFieldsRef.current = false; }, 0);
+    } catch {
+      // Keep as-is; error already shown
+    }
+  };
+
   // Export schema
   const exportSchema = () => {
     const schema = generateJsonSchemaFromFields(fields);
@@ -620,6 +696,7 @@ export const EnhancedSchemaBuilder: React.FC<SchemaBuilderProps> = ({
         {/* Add New Field Button */}
         <div className="flex items-center gap-4 pt-8 border-t border-slate-700/50">
           <Button
+            type="button"
             onClick={() => addField('string')}
             variant="outline"
             className="flex items-center gap-3 px-6 py-3 border-dashed border-2 border-blue-500/50 bg-blue-500/10 backdrop-blur-sm hover:border-blue-400/70 hover:bg-blue-500/20 text-blue-300 font-semibold rounded-xl transition-all duration-200 shadow-sm hover:shadow-lg hover:shadow-blue-500/20"
@@ -629,6 +706,7 @@ export const EnhancedSchemaBuilder: React.FC<SchemaBuilderProps> = ({
           </Button>
 
           <Button
+            type="button"
             onClick={() => addField('object')}
             variant="outline"
             className="flex items-center gap-3 px-6 py-3 text-slate-300 font-semibold bg-slate-700/40 backdrop-blur-sm hover:text-blue-300 hover:bg-blue-500/10 border border-slate-600/50 hover:border-blue-500/50 rounded-xl transition-all duration-200 shadow-sm hover:shadow-md"
@@ -638,6 +716,7 @@ export const EnhancedSchemaBuilder: React.FC<SchemaBuilderProps> = ({
           </Button>
 
           <Button
+            type="button"
             onClick={() => addField('array')}
             variant="outline"
             className="flex items-center gap-3 px-6 py-3 text-slate-300 font-semibold bg-slate-700/40 backdrop-blur-sm hover:text-orange-300 hover:bg-orange-500/10 border border-slate-600/50 hover:border-orange-500/50 rounded-xl transition-all duration-200 shadow-sm hover:shadow-md"
@@ -651,6 +730,7 @@ export const EnhancedSchemaBuilder: React.FC<SchemaBuilderProps> = ({
           {fields.length > 0 && (
             <>
               <Button 
+                type="button"
                 variant="outline" 
                 onClick={clearSchema} 
                 className="px-6 py-3 text-red-300 font-semibold bg-red-500/10 backdrop-blur-sm hover:text-red-200 hover:bg-red-500/20 border border-red-500/30 hover:border-red-400/50 rounded-xl transition-all duration-200 shadow-sm hover:shadow-md"
@@ -658,6 +738,7 @@ export const EnhancedSchemaBuilder: React.FC<SchemaBuilderProps> = ({
                 Clear All
               </Button>
               <Button 
+                type="button"
                 onClick={exportSchema} 
                 className="px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold border border-green-500/30 rounded-xl shadow-lg hover:shadow-xl hover:shadow-green-500/20 transition-all duration-200"
               >
@@ -680,11 +761,21 @@ export const EnhancedSchemaBuilder: React.FC<SchemaBuilderProps> = ({
           </div>
           <div className="p-0">
             <Textarea
-              value={generatePreview()}
-              readOnly
-              className="font-mono text-sm min-h-[300px] border-0 bg-slate-900/80 text-emerald-400 rounded-t-none rounded-b-2xl focus:ring-0 p-8 leading-relaxed resize-none"
-              placeholder="Your generated schema will appear here..."
+              value={jsonText}
+              onChange={handleJsonChange}
+              onBlur={handleJsonBlur}
+              className={`font-mono text-sm min-h-[300px] border-0 rounded-t-none rounded-b-2xl focus:ring-0 p-8 leading-relaxed resize-none ${jsonError ? 'bg-red-950/60 text-red-300' : 'bg-slate-900/80 text-emerald-400'}`}
+              placeholder="Edit JSON here to update the builder, or use the controls above..."
             />
+            {jsonError ? (
+              <div className="px-8 py-2 text-xs text-red-300 bg-red-900/30 border-t border-red-800/50 rounded-b-2xl">
+                {jsonError}
+              </div>
+            ) : (
+              <div className="px-8 py-2 text-xs text-slate-400 bg-slate-900/60 border-t border-slate-700/50 rounded-b-2xl">
+                Changes in this JSON are synced with the fields above.
+              </div>
+            )}
           </div>
         </div>
       )}
