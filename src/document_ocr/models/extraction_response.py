@@ -36,5 +36,35 @@ class ExtractionResponse(BaseModel):
     )
 
 
+class TextOnlyExtractionResponse(BaseModel):
+    """Response model for OCR-text-only LLM extraction (no visual grounding from LLM).
+
+    The LLM must not return field_mappings. Instead, it returns:
+      - extracted_data: normal structured data per schema/instructions
+      - reasoning_map: compact reasoning for each fully-qualified field path. For arrays,
+        include array-level entries (e.g., "tags") and type-level entries (e.g., "items[].sku").
+        Avoid per-index reasoning unless an exception applies.
+      - visual_only_confidence (optional): per-field confidence ONLY for fields that are not
+        OCR-groundable and inferred purely from visual context.
+    Visual grounding is computed later by backend manual matching.
+    """
+
+    extracted_data: Dict[str, Any] = Field(..., description="Data matching the target schema and/or the user instructions")
+    reasoning_map: Dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Compact reasoning per field path or array-level/type-level keys. "
+            "Use fully-qualified paths (dot/bracket) for direct fields (e.g., 'customer.name', 'items[0].sku'), "
+            "and for arrays include 'tags' and type-level keys like 'items[].sku'."
+        ),
+    )
+    visual_only_confidence: Optional[Dict[str, float]] = Field(
+        default=None,
+        description=(
+            "Optional per-field confidence ONLY for fields inferred purely from visual context "
+            "and not expected to be found in OCR text."
+        ),
+    )
+
 # JSON schema for the model
 EXTRACTION_RESPONSE_SCHEMA = ExtractionResponse.model_json_schema()
