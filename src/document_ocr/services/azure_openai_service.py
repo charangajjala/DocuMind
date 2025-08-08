@@ -56,6 +56,46 @@ class AzureOpenAIService(LLMProvider):
         """Validate the Azure OpenAI configuration."""
         if not self.api_key:
             raise AzureOpenAIError("Azure OpenAI API key is required")
+    def _normalize_field_mappings(self, field_mappings: Dict[str, Any], extracted_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Ensure arrays in field_mappings are expanded into per-index entries.
+
+        Accepts array-level reasoning (e.g., "items[].sku" or "tags") but forbids array values under a single key.
+        """
+        normalized: Dict[str, Any] = {}
+
+        for key, mapping in field_mappings.items():
+            # Pass-through non-dicts
+            if not isinstance(mapping, dict):
+                normalized[key] = mapping
+                continue
+
+            # If mapping has an array value, expand to per-index entries
+            if "value" in mapping and isinstance(mapping["value"], list):
+                values = mapping["value"]
+                confidence = mapping.get("confidence", 0.0)
+                source_blocks = mapping.get("source_block_id", [])
+                if not isinstance(source_blocks, list):
+                    source_blocks = [source_blocks] if source_blocks is not None else []
+
+                # Keep array-level reasoning only
+                if mapping.get("reasoning"):
+                    normalized[key] = {"reasoning": mapping["reasoning"]}
+
+                # Emit per-index entries
+                for i, v in enumerate(values):
+                    indexed_key = f"{key}[{i}]"
+                    sbid = source_blocks[i] if i < len(source_blocks) else "visual_only"
+                    normalized[indexed_key] = {
+                        "value": v,
+                        "confidence": confidence,
+                        "source_block_id": sbid,
+                    }
+                continue
+
+            # Otherwise keep as-is
+            normalized[key] = mapping
+
+        return normalized
         
         if not self.endpoint:
             raise AzureOpenAIError("Azure OpenAI endpoint is required")
@@ -154,6 +194,16 @@ class AzureOpenAIService(LLMProvider):
             
             # Parse the response - LLM returns ExtractionResponse format
             llm_full_response = json.loads(raw_llm_response)
+
+            # Normalize field_mappings to ensure per-index entries for arrays
+            try:
+                llm_full_response["field_mappings"] = self._normalize_field_mappings(
+                    llm_full_response.get("field_mappings", {}),
+                    llm_full_response.get("extracted_data", {})
+                )
+            except Exception:
+                # Do not fail extraction if normalization encounters unexpected structure
+                pass
             
             # Add the prompts used and raw response to the LLM response
             llm_full_response["prompts_used"] = {

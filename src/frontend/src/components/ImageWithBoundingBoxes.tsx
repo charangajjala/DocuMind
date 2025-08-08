@@ -5,20 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
 
-interface BoundingBox {
-  x_min: number;
-  y_min: number;
-  x_max: number;
-  y_max: number;
-}
-
-interface GroundedField {
-  field_name: string;
-  value: any;
-  confidence: number;
-  source_text_blocks: number[]; // supports multiple blocks per value
-  bounding_boxes: BoundingBox[];
-}
+import type { GroundedField } from '@/types/extraction';
 
 interface ImageWithBoundingBoxesProps {
   imageSrc: string;
@@ -57,8 +44,9 @@ export function ImageWithBoundingBoxes({
   const [scrollStart, setScrollStart] = useState({ x: 0, y: 0 });
 
   // Calculate base scale to fit image nicely in available scroll container space
-  const availableWidth = scrollContainerRef.current?.clientWidth ?? 800;
-  const availableHeight = scrollContainerRef.current?.clientHeight ?? 600;
+  const availableWidth = scrollContainerRef.current?.clientWidth ?? (imageWidth ?? 800);
+  const availableHeight = scrollContainerRef.current?.clientHeight ?? (imageHeight ?? 600);
+  // Fit-to-view: never upscale by default. Clamp at 1 so "100%" = natural size.
   const baseScale = imageNaturalSize.width > 0
     ? Math.min(
         (availableWidth - 32) / imageNaturalSize.width,
@@ -173,15 +161,19 @@ export function ImageWithBoundingBoxes({
     setIsDragging(false);
   }, []);
 
-  // Handle image load
-  const handleImageLoad = useCallback(() => {
+  // Handle image load (supports both hidden preloader img and visible img)
+  const handleImageLoad = useCallback((e?: React.SyntheticEvent<HTMLImageElement>) => {
+    if (e && e.currentTarget) {
+      setImageNaturalSize({
+        width: e.currentTarget.naturalWidth,
+        height: e.currentTarget.naturalHeight,
+      });
+      setImageLoaded(true);
+      return;
+    }
     const image = imageRef.current;
     if (!image) return;
-
-    setImageNaturalSize({
-      width: image.naturalWidth,
-      height: image.naturalHeight
-    });
+    setImageNaturalSize({ width: image.naturalWidth, height: image.naturalHeight });
     setImageLoaded(true);
   }, []);
 
@@ -377,7 +369,7 @@ export function ImageWithBoundingBoxes({
     drawCanvas();
   }, [drawCanvas]);
 
-  // Get popup position - optimized like OCR popup
+  // Get popup position: attach near bbox with side-aware placement and connector
   const getPopupPosition = () => {
     // Prefer internal hover (from canvas), but fall back to external hover (from sidebar)
     const activeFieldName = hoveredFieldInternal || hoveredField || null;
@@ -395,31 +387,51 @@ export function ImageWithBoundingBoxes({
       const largestArea = (largest.x_max - largest.x_min) * (largest.y_max - largest.y_min);
       return currentArea > largestArea ? current : largest;
     });
+    // Convert bbox to pixels
+    const bx = bbox.x_min * displayWidth;
+    const by = bbox.y_min * displayHeight;
+    const bw = (bbox.x_max - bbox.x_min) * displayWidth;
+    const bh = (bbox.y_max - bbox.y_min) * displayHeight;
 
-    const x = bbox.x_min * displayWidth;
-    const y = bbox.y_min * displayHeight;
-    
-    // More intelligent positioning to keep popup in view
-    const popupWidth = 176; // w-44 = 176px
-    const popupHeight = 80; // estimated height
-    
-    let left = x;
-    let top = y - popupHeight - 8; // Above the bbox by default
-    
-    // If popup would go off right edge, shift left
-    if (left + popupWidth > displayWidth) {
-      left = displayWidth - popupWidth - 8;
+    const gap = 10;
+    const popupWidth = 220;
+    const popupHeight = 110;
+
+    // Try right of bbox
+    let side: 'right' | 'left' | 'below' | 'above' = 'right';
+    let left = bx + bw + gap;
+    let top = by + bh / 2 - popupHeight / 2;
+
+    // If off right edge → left
+    if (left + popupWidth > displayWidth - 8) {
+      side = 'left';
+      left = bx - popupWidth - gap;
+      top = by + bh / 2 - popupHeight / 2;
     }
-    
-    // If popup would go off top, show below bbox instead
-    if (top < 8) {
-      top = y + (bbox.y_max - bbox.y_min) * displayHeight + 8;
+    // If off left edge → below
+    if (left < 8) {
+      side = 'below';
+      left = bx + bw / 2 - popupWidth / 2;
+      top = by + bh + gap;
     }
-    
-    return {
-      left: Math.max(8, left),
-      top: Math.max(8, top)
-    };
+    // If off bottom → above
+    if (top + popupHeight > displayHeight - 8) {
+      if (side === 'below') {
+        side = 'above';
+        left = bx + bw / 2 - popupWidth / 2;
+        top = by - popupHeight - gap;
+      }
+    }
+
+    // Clamp within viewport
+    left = Math.min(Math.max(8, left), displayWidth - popupWidth - 8);
+    top = Math.min(Math.max(8, top), displayHeight - popupHeight - 8);
+
+    // Anchor point on bbox for connector line
+    const anchorX = bx + (side === 'right' ? bw : side === 'left' ? 0 : bw / 2);
+    const anchorY = by + (side === 'below' ? bh : side === 'above' ? 0 : bh / 2);
+
+    return { left, top, anchorX, anchorY, side, popupWidth, popupHeight } as const;
   };
 
   const popupPosition = getPopupPosition();
@@ -478,6 +490,16 @@ export function ImageWithBoundingBoxes({
           style={{ cursor: isDragging ? 'grabbing' : 'grab', WebkitOverflowScrolling: 'touch' }}
         >
           <div ref={containerRef} className="p-4" style={{ width: displayWidth + 32, height: displayHeight + 32 }}>
+            {/* Hidden preloader to ensure onLoad fires even before we know sizes */}
+            {imageSrc && (
+              <img
+                src={imageSrc}
+                alt="preload"
+                onLoad={handleImageLoad}
+                style={{ display: 'none' }}
+              />
+            )}
+
             {displayWidth > 0 && imageLoaded && (
               <div className="relative" style={{ width: displayWidth, height: displayHeight }}>
                 {/* Image layer (visible) */}
@@ -511,16 +533,23 @@ export function ImageWithBoundingBoxes({
                 {/* Popup overlay - positioned absolute relative to canvas */}
                 {activeFieldName && popupPosition && hoveredFieldData && (
                   <div
-                    className="absolute z-50 pointer-events-none"
-                    style={{
-                      left: `${popupPosition.left}px`,
-                      top: `${popupPosition.top}px`,
-                    }}
+                    className="absolute z-50 pointer-events-auto"
+                    style={{ left: `${popupPosition.left}px`, top: `${popupPosition.top}px` }}
                   >
-                    <Card className="p-1 shadow-2xl border-0 w-44 bg-black/40 dark:bg-black/60 backdrop-blur-2xl rounded-xl ring-1 ring-white/30 dark:ring-white/20"
-                          style={{
-                            borderLeft: `2px solid ${getFieldColor(hoveredFieldData.field_name)}`,
-                          }}>
+                    {/* Connector line from bbox to popup */}
+                    <svg className="absolute pointer-events-none" width={popupPosition.popupWidth + 20} height={popupPosition.popupHeight + 20} style={{ left: -10, top: -10 }}>
+                      <line
+                        x1={popupPosition.anchorX - popupPosition.left}
+                        y1={popupPosition.anchorY - popupPosition.top}
+                        x2={popupPosition.side === 'right' ? 0 : popupPosition.side === 'left' ? popupPosition.popupWidth : popupPosition.popupWidth / 2}
+                        y2={popupPosition.side === 'below' ? 0 : popupPosition.side === 'above' ? popupPosition.popupHeight : popupPosition.popupHeight / 2}
+                        stroke="rgba(255,255,255,0.7)"
+                        strokeWidth={1.5}
+                      />
+                    </svg>
+
+                    <Card className="p-1 shadow-2xl border-0 w-56 bg-black/60 dark:bg-black/70 backdrop-blur-2xl rounded-xl ring-1 ring-white/30 dark:ring-white/20"
+                          style={{ borderLeft: `2px solid ${getFieldColor(hoveredFieldData.field_name)}` }}>
                   <div className="space-y-1">
                         <div className="flex items-center justify-between gap-1">
                           <Badge
@@ -545,12 +574,27 @@ export function ImageWithBoundingBoxes({
 
                         {/* Reasoning snippet */}
                         {hoveredFieldData.reasoning && (
-                          <div className="text-[9px] text-white/90 bg-white/10 p-1 rounded mt-1 max-h-16 overflow-y-auto">
+                          <div className="text-[9px] text-white/90 bg-white/10 p-1 rounded mt-1 max-h-24 overflow-y-auto overscroll-contain pointer-events-auto">
                             {hoveredFieldData.reasoning}
                           </div>
                         )}
                       </div>
                     </Card>
+                    {/* Side arrow indicator */}
+                    <div
+                      className="absolute"
+                      style={{
+                        width: 10,
+                        height: 10,
+                        background: 'rgba(0,0,0,0.6)',
+                        transform: 'rotate(45deg)',
+                        left: popupPosition.side === 'right' ? -5 : popupPosition.side === 'left' ? undefined : '50%',
+                        right: popupPosition.side === 'left' ? -5 : undefined,
+                        top: popupPosition.side === 'below' || popupPosition.side === 'above' ? (popupPosition.popupHeight / 2 - 5) : '50%',
+                        marginTop: popupPosition.side === 'right' || popupPosition.side === 'left' ? -5 : 0,
+                        marginLeft: popupPosition.side === 'right' ? 0 : popupPosition.side === 'left' ? 0 : -5,
+                      }}
+                    />
                   </div>
                 )}
               </div>
@@ -563,6 +607,11 @@ export function ImageWithBoundingBoxes({
                   <div className="text-xs text-muted-foreground">
                     Processing field mapping...
                   </div>
+                  {imageSrc ? (
+                    <div className="text-xs text-muted-foreground">Waiting for image to load…</div>
+                  ) : (
+                    <div className="text-xs text-red-500">No image available</div>
+                  )}
                 </div>
               </div>
             )}

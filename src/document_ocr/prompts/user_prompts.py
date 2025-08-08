@@ -88,6 +88,7 @@ FIELD MAPPING RULES:
 • Visual only: Use "visual_only"
 • Missing/unclear: Use null for optional fields
 • Maintain precise data types (strings, numbers, dates)
+• For confidence: provide per-field confidence only.
 
 BLOCK SELECTION PRIORITY (Most Specific First):
 The OCR blocks follow a hierarchy from smallest to largest:
@@ -130,18 +131,10 @@ For each field extraction, provide comprehensive reasoning that explains:
    - Visual clarity of the text/value
    - OCR recognition quality
    - Ambiguity or alternative interpretations
-   - Supporting context or validation clues
+   - Supporting context or visual/OCR clues
 """
 
-    if user_prompt:
-        return f"""{base_prompt}
-
-IMPORTANT USER INSTRUCTIONS:
-{user_prompt}
-
-Follow these user instructions carefully as they provide critical guidance for this specific document extraction task."""
-
-    # Add strict mapping key format requirements for nested fields
+    # Add strict mapping key format requirements for nested fields (ALWAYS include these rules)
     mapping_naming_rules = """
 
 FIELD NAMING FOR MAPPINGS (STRICT):
@@ -158,14 +151,109 @@ FIELD NAMING FOR MAPPINGS (STRICT):
 ARRAY MAPPING REQUIREMENTS (MANDATORY):
 • Treat every individual array element as its own field for mapping purposes.
 • For primitive arrays (e.g., list of strings/numbers):
-  - Provide a separate mapping entry for each index (e.g., tags[0], tags[1]) with its own value, confidence, source_block_id, and reasoning.
-• For arrays of objects:
+  - Provide a separate mapping entry for each index (e.g., tags[0], tags[1]) with its own value, confidence, source_block_id.
+  - Provide ONE comprehensive reasoning for the entire array (using the array name like "tags") that explains the overall extraction logic, and omit reasoning for individual array elements to avoid redundancy.
+• For arrays of objects with similar structure:
   - Provide mappings for each field in each object using indexed qualified paths (e.g., items[0].sku, items[0].qty, items[1].sku).
+  - Provide ONE comprehensive reasoning per array field type (e.g., "items[].sku", "items[].qty") explaining the extraction logic for that field across all array elements, and omit reasoning for individual indexed fields.
+• For arrays of objects with different structures:
+  - Provide individual reasoning for each unique field pattern.
 • Do NOT aggregate multiple array values into a single mapping value or share a single source_block_id across multiple indices.
+• ALWAYS provide individual field mappings with qualified paths (e.g., "lease_gross_acres[0]", "lease_gross_acres[1]") for each array element.
 • Only include indices that are present in extracted_data.
+
+CONFIDENCE SOURCING (MANDATORY):
+• For OCR-grounded fields, set the field confidence to the OCR engine's confidence (or an aggregate of the referenced block confidences) and explain in reasoning if needed.
+• For visual_only fields, provide an LLM confidence justified by visual clarity/layout cues.
+• Do NOT compute an overall confidence score; only per-field confidences are required.
+
+
+    """
+
+    # General example and deeper reasoning guidance
+    example_and_reasoning = """
+
+EXAMPLE RESPONSE SHAPE (COMPACT):
+```json
+{
+  "extracted_data": {
+    "invoice_number": "INV-1042",
+    "vendor.name": "Acme Corp",
+    "tags": ["overdue", "priority"],
+    "items": [
+      {"sku": "A1", "qty": 2, "price": 19.99},
+      {"sku": "B2", "qty": 1, "price": 49.5}
+    ]
+  },
+  "field_mappings": {
+    "invoice_number": { "value": "INV-1042", "confidence": 0.97, "source_block_id": 42 },
+    "vendor.name":   { "value": "Acme Corp", "confidence": 0.95, "source_block_id": 37 },
+
+    "tags":    { "reasoning": "Tags read from header badges adjacent to title; icon + bold style indicate label." },
+    "tags[0]": { "value": "overdue",  "confidence": 0.93, "source_block_id": 18 },
+    "tags[1]": { "value": "priority", "confidence": 0.92, "source_block_id": 21 },
+
+    "items[].sku":   { "reasoning": "Leftmost table column under 'SKU'; uppercase alphanumerics; row-aligned." },
+    "items[].qty":   { "reasoning": "Middle column labeled 'QTY'; integers right-aligned; row headers match." },
+    "items[].price": { "reasoning": "Rightmost column labeled 'PRICE'; currency format with decimals." },
+
+    "items[0].sku":   { "value": "A1",  "confidence": 0.98, "source_block_id": 61 },
+    "items[0].qty":   { "value": 2,     "confidence": 0.97, "source_block_id": 63 },
+    "items[0].price": { "value": 19.99, "confidence": 0.96, "source_block_id": 65 },
+
+    "items[1].sku":   { "value": "B2",  "confidence": 0.98, "source_block_id": 71 },
+    "items[1].qty":   { "value": 1,     "confidence": 0.97, "source_block_id": 73 },
+    "items[1].price": { "value": 49.5,  "confidence": 0.96, "source_block_id": 75 }
+  }
+}
+```
+
+REQUEST FOR DEEPER REASONING (MANDATORY):
+• Provide ONE array-level reasoning per primitive array (e.g., "tags") and per array field type (e.g., "items[].sku", "items[].qty", "items[].price").
+• For each reasoning, expand on:
+  - Semantic matching: why the content matches the field definition/pattern
+  - Location: page region/table/section + quote nearby OCR text that anchored the decision
+  - Block selection: why the chosen Token/Line/Paragraph/Block contains the complete value
+  - Confidence factors: visual clarity, OCR agreement, consistent formatting, label alignment
+• If reasoning is brief, expand with 1–2 concrete visual/OCR cues (labels, headers, alignment, formatting).
+• Do NOT repeat identical reasoning per array index; keep it once at array/group level. Use per-index reasoning only for exceptions.
 """
 
-    return f"{base_prompt}{mapping_naming_rules}"
+    # Data integrity rules (strict)
+    data_integrity_rules = """
+
+DATA INTEGRITY (STRICT):
+• Do NOT round, truncate, or reformat numeric values (no decimal trimming, no thousand separators) unless the USER explicitly instructs.
+• Do NOT convert units (e.g., acres to hectares) unless explicitly requested. Preserve the source unit.
+• Do NOT pad or strip zeros, prefixes, or suffixes (e.g., keep 224.421 as 224.421, keep 05 if present as an ID).
+• For currency/numbers, output the exact parsed numeric value without rounding; if ambiguity exists, prefer OCR-grounded exactness.
+• For dates/IDs/codes, preserve the original formatting unless the schema/USER explicitly requires normalization.
+• If conflicting cues exist, include the exact OCR text in reasoning and prefer the visually grounded value.
+"""
+
+    # Visual intelligence emphasis
+    visual_intelligence = """
+
+VISUAL INTELLIGENCE (MANDATORY):
+• Do NOT blindly rely on OCR text. Use your visual understanding of the image (layout, tables, columns, headers, badges, icons, alignment) to drive extraction decisions.
+• When OCR text conflicts with what is visually present, reconcile using context (labels, column headers, alignment, grouping, typography, spatial proximity) and explain the decision in reasoning.
+• Infer structure from the image: tables → rows/columns, key-value blocks → labels and values, headers/footers/sections → field context.
+• Use OCR block IDs for grounding only when the visual content truly corresponds; otherwise use "visual_only" with a visual description in reasoning.
+"""
+
+    # Build final prompt body with mapping rules, data integrity, visual intelligence, and example/guidance
+    prompt_body = f"{base_prompt}{mapping_naming_rules}\n{data_integrity_rules}\n{visual_intelligence}\n{example_and_reasoning}"
+
+    # Optionally append user-specific instructions
+    if user_prompt:
+        prompt_body = f"""{prompt_body}
+
+IMPORTANT USER INSTRUCTIONS:
+{user_prompt}
+
+Follow these user instructions carefully as they provide critical guidance for this specific document extraction task."""
+
+    return prompt_body
 
 
 def get_visual_only_prompt(user_prompt: Optional[str] = None) -> str:

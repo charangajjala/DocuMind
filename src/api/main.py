@@ -328,13 +328,28 @@ async def extract_structured_data(request: StructuredExtractionRequest):
         )
         
         # Convert grounded fields to API format
-        grounded_fields_api = [
-            {
+        grounded_fields_api = []
+        for field in result.grounded_fields:
+            # Try to collect OCR text for the referenced blocks to preserve exact formatting
+            ocr_text_found = None
+            try:
+                if result.ocr_results and getattr(field, 'source_text_blocks', None):
+                    texts = []
+                    for bid in field.source_text_blocks:
+                        if isinstance(bid, int) and 0 <= bid < len(result.ocr_results.text_blocks):
+                            texts.append(result.ocr_results.text_blocks[bid].text)
+                    if texts:
+                        ocr_text_found = " ".join(texts)
+            except Exception:
+                ocr_text_found = None
+
+            grounded_fields_api.append({
                 "field_name": field.field_name,
                 "value": field.value,
                 "confidence": field.confidence,
                 "source_text_blocks": field.source_text_blocks,
                 "reasoning": field.reasoning,
+                "ocr_text_found": ocr_text_found,
                 "bounding_boxes": [
                     {
                         "x_min": bbox.x_min,
@@ -344,9 +359,7 @@ async def extract_structured_data(request: StructuredExtractionRequest):
                     }
                     for bbox in field.bounding_boxes
                 ]
-            }
-            for field in result.grounded_fields
-        ]
+            })
         
         return StructuredExtractionResponse(
             success=True,
