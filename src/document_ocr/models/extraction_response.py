@@ -25,8 +25,13 @@ class ExtractionResponse(BaseModel):
     
     extracted_data: Dict[str, Any] = Field(..., description="Data matching the target schema and/or the user instructions")
     field_mappings: Dict[str, FieldMapping] = Field(
-        ..., 
-        description="For each extracted field, provide the MOST SPECIFIC OCR block ID that contains the complete value (Token > Line > Paragraph > Block) OR 'visual_only'"
+        ...,
+        description=(
+            "Mapping from fully-qualified field paths to detailed mapping info. "
+            "Keys MUST use qualified paths with dot/bracket notation (e.g., 'customer.name', 'items[0].sku'). "
+            "Each entry corresponds to a single extracted value (including individual array elements). "
+            "In each mapping, source_block_id MUST be either a single integer block id, a list of integer block ids when the value truly spans multiple OCR elements, or 'visual_only' when no OCR block contains the value."
+        ),
     )
     overall_confidence: float = Field(..., ge=0.0, le=1.0, description="Overall extraction confidence score")
 
