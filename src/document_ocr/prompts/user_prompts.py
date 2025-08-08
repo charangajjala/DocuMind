@@ -147,12 +147,22 @@ Follow these user instructions carefully as they provide critical guidance for t
 FIELD NAMING FOR MAPPINGS (STRICT):
 • Keys in field_mappings MUST use fully-qualified paths:
   - Nested objects: parent.child.grandchild (dot notation)
-  - Arrays of objects: items[0].name, items[1].price (use zero-based bracket indices)
+  - Arrays: Each element MUST be mapped individually using zero-based indices. Never map an entire array to a single mapping entry.
+    Example: items[0], items[1], and for objects inside arrays: items[0].name, items[1].price
 • Use exact same paths for extracted_data keys where possible, so each mapping key corresponds 1:1 to an extracted value
 • Example:
   extracted_data.customer.name → field_mappings["customer.name"]
   extracted_data.items[0].amount → field_mappings["items[0].amount"]
 • If a top-level field is a scalar, use just the field name (e.g., "invoice_number")
+
+ARRAY MAPPING REQUIREMENTS (MANDATORY):
+• Treat every individual array element as its own field for mapping purposes.
+• For primitive arrays (e.g., list of strings/numbers):
+  - Provide a separate mapping entry for each index (e.g., tags[0], tags[1]) with its own value, confidence, source_block_id, and reasoning.
+• For arrays of objects:
+  - Provide mappings for each field in each object using indexed qualified paths (e.g., items[0].sku, items[0].qty, items[1].sku).
+• Do NOT aggregate multiple array values into a single mapping value or share a single source_block_id across multiple indices.
+• Only include indices that are present in extracted_data.
 """
 
     return f"{base_prompt}{mapping_naming_rules}"

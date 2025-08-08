@@ -56,14 +56,16 @@ export function ImageWithBoundingBoxes({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [scrollStart, setScrollStart] = useState({ x: 0, y: 0 });
 
-  // Calculate base scale to fit image nicely in viewport
-  const baseScale = imageNaturalSize.width > 0 && containerRef.current ? 
-    Math.min(
-      (containerRef.current.clientWidth - 100) / imageNaturalSize.width, 
-      (containerRef.current.clientHeight - 200) / imageNaturalSize.height,
-      1
-    ) : 
-    imageNaturalSize.width > 0 ? Math.min(600 / imageNaturalSize.width, 1) : 1;
+  // Calculate base scale to fit image nicely in available scroll container space
+  const availableWidth = scrollContainerRef.current?.clientWidth ?? 800;
+  const availableHeight = scrollContainerRef.current?.clientHeight ?? 600;
+  const baseScale = imageNaturalSize.width > 0
+    ? Math.min(
+        (availableWidth - 32) / imageNaturalSize.width,
+        (availableHeight - 32) / imageNaturalSize.height,
+        1
+      )
+    : 1;
 
   // Calculate actual display dimensions with base scale
   const displayWidth = imageNaturalSize.width * baseScale * zoomLevel;
@@ -86,6 +88,37 @@ export function ImageWithBoundingBoxes({
     }
     return groupKeyToColor.current[key];
   }, [normalizeGroupKey]);
+
+  const hexToRgba = (hex: string, alpha: number) => {
+    // Expect #RRGGBB
+    const cleaned = hex.replace('#', '');
+    const r = parseInt(cleaned.substring(0, 2), 16);
+    const g = parseInt(cleaned.substring(2, 4), 16);
+    const b = parseInt(cleaned.substring(4, 6), 16);
+    const a = Math.max(0, Math.min(1, alpha));
+    return `rgba(${r}, ${g}, ${b}, ${a})`;
+  };
+
+  const pathsMatch = (target: string, hover: string | null): boolean => {
+    if (!hover) return false;
+    if (hover === target) return true;
+    
+    // group prefix
+    if (hover.startsWith('group:')) {
+      const prefix = hover.slice('group:'.length);
+      return target.startsWith(prefix);
+    }
+    
+    // Check if hovering array container matches array elements
+    if (hover.endsWith('[]') || (!hover.includes('[') && target.includes('['))) {
+      const baseHover = hover.replace('[]', '');
+      const baseTarget = target.replace(/\[[^\]]*\].*$/, '');
+      if (baseHover === baseTarget) return true;
+    }
+    
+    // parent/child containment
+    return target.startsWith(hover) || hover.startsWith(target);
+  };
 
   const handleMouseEnter = useCallback((fieldName: string) => {
     setHoveredFieldInternal(fieldName);
@@ -184,6 +217,15 @@ export function ImageWithBoundingBoxes({
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
+    // Debug: Log image and canvas dimensions
+    console.log('Canvas drawing debug:', {
+      imageNaturalSize,
+      displaySize: { displayWidth, displayHeight },
+      baseScale,
+      zoomLevel,
+      imageProvidedDimensions: { imageWidth, imageHeight }
+    });
+
     // Draw bounding boxes for fields that have them
     groundedFields.forEach((field) => {
       if (!field.bounding_boxes || field.bounding_boxes.length === 0) {
@@ -191,36 +233,57 @@ export function ImageWithBoundingBoxes({
       }
 
       const color = getFieldColor(field.field_name);
-      // Support group hover: hoveredField may be like "group:path.to.object"
-      let isHovered = hoveredField === field.field_name || hoveredFieldInternal === field.field_name;
-      if (!isHovered && hoveredField && hoveredField.startsWith('group:')) {
-        const prefix = hoveredField.slice('group:'.length);
-        isHovered = field.field_name.startsWith(prefix);
-      }
+      // Match on exact, group, or parent/child path relationships
+      const isHovered = pathsMatch(field.field_name, hoveredField) || pathsMatch(field.field_name, hoveredFieldInternal);
 
-      // Debug logging for TM_CODE field
-      if (field.field_name === 'TM_CODE') {
-        console.log('TM_CODE field:', {
+      // Debug logging for all fields to understand hover matching
+      if (hoveredField || hoveredFieldInternal) {
+        console.log('Field matching debug:', {
           field_name: field.field_name,
-          bounding_boxes_count: field.bounding_boxes.length,
-          bounding_boxes: field.bounding_boxes
+          hoveredField,
+          hoveredFieldInternal,
+          isHovered,
+          bounding_boxes_count: field.bounding_boxes.length
         });
       }
 
       field.bounding_boxes.forEach((bbox) => {
         // Convert normalized coordinates to display coordinates
-        const x = bbox.x_min * displayWidth;
-        const y = bbox.y_min * displayHeight;
-        const width = (bbox.x_max - bbox.x_min) * displayWidth;
-        const height = (bbox.y_max - bbox.y_min) * displayHeight;
+        // Use the actual image natural size for conversion, then scale to display
+        const naturalX = bbox.x_min * imageNaturalSize.width;
+        const naturalY = bbox.y_min * imageNaturalSize.height;
+        const naturalWidth = (bbox.x_max - bbox.x_min) * imageNaturalSize.width;
+        const naturalHeight = (bbox.y_max - bbox.y_min) * imageNaturalSize.height;
+        
+        // Scale to display size
+        const scaleX = displayWidth / imageNaturalSize.width;
+        const scaleY = displayHeight / imageNaturalSize.height;
+        
+        const x = naturalX * scaleX;
+        const y = naturalY * scaleY;
+        const width = naturalWidth * scaleX;
+        const height = naturalHeight * scaleY;
+
+        // Debug bbox coordinates for hovered fields
+        if (isHovered) {
+          console.log('Drawing bbox for hovered field:', {
+            field_name: field.field_name,
+            bbox_normalized: bbox,
+            imageNaturalSize,
+            display_dimensions: { displayWidth, displayHeight },
+            natural_pixels: { naturalX, naturalY, naturalWidth, naturalHeight },
+            scale: { scaleX, scaleY },
+            final_pixels: { x, y, width, height }
+          });
+        }
 
         // Fill for hovered fields
         if (isHovered) {
-          ctx.fillStyle = color + '25';
+          ctx.fillStyle = hexToRgba(color, 0.15);
           ctx.fillRect(x, y, width, height);
 
-          // Add pulsing glow effect for hovered fields
-          ctx.shadowColor = color;
+          // Hover glow
+          ctx.shadowColor = hexToRgba(color, 0.9);
           ctx.shadowBlur = 12;
           ctx.strokeStyle = color;
           ctx.lineWidth = 3;
@@ -230,7 +293,7 @@ export function ImageWithBoundingBoxes({
 
         // Border with enhanced visibility
         ctx.setLineDash([]);
-        ctx.strokeStyle = color + (isHovered ? 'FF' : 'BB');
+        ctx.strokeStyle = hexToRgba(color, isHovered ? 1 : 0.7);
         ctx.lineWidth = isHovered ? 3 : 2;
         ctx.setLineDash([]);
         ctx.strokeRect(x, y, width, height);
@@ -316,7 +379,11 @@ export function ImageWithBoundingBoxes({
 
   // Get popup position - optimized like OCR popup
   const getPopupPosition = () => {
-    const hoveredFieldData = groundedFields.find(f => f.field_name === hoveredFieldInternal);
+    // Prefer internal hover (from canvas), but fall back to external hover (from sidebar)
+    const activeFieldName = hoveredFieldInternal || hoveredField || null;
+    const hoveredFieldData = activeFieldName
+      ? groundedFields.find(f => f.field_name === activeFieldName)
+      : null;
     if (!hoveredFieldData || !hoveredFieldData.bounding_boxes?.[0]) return null;
 
     const canvas = canvasRef.current;
@@ -356,7 +423,10 @@ export function ImageWithBoundingBoxes({
   };
 
   const popupPosition = getPopupPosition();
-  const hoveredFieldData = groundedFields.find(f => f.field_name === hoveredFieldInternal);
+  const activeFieldName = hoveredFieldInternal || hoveredField || null;
+  const hoveredFieldData = activeFieldName
+    ? groundedFields.find(f => f.field_name === activeFieldName)
+    : null;
 
   return (
     <TooltipProvider>
@@ -408,19 +478,20 @@ export function ImageWithBoundingBoxes({
           style={{ cursor: isDragging ? 'grabbing' : 'grab', WebkitOverflowScrolling: 'touch' }}
         >
           <div ref={containerRef} className="p-4" style={{ width: displayWidth + 32, height: displayHeight + 32 }}>
-            {/* Image layer (visible) */}
-            <img
-              ref={imageRef}
-              src={imageSrc}
-              alt="Document for field analysis"
-              onLoad={handleImageLoad}
-              draggable={false}
-              className="select-none pointer-events-none rounded-lg shadow-lg"
-              style={{ width: displayWidth, height: displayHeight }}
-            />
-
             {displayWidth > 0 && imageLoaded && (
               <div className="relative" style={{ width: displayWidth, height: displayHeight }}>
+                {/* Image layer (visible) */}
+                <img
+                  ref={imageRef}
+                  src={imageSrc}
+                  alt="Document for field analysis"
+                  onLoad={handleImageLoad}
+                  draggable={false}
+                  className="absolute top-0 left-0 select-none pointer-events-none rounded-lg shadow-lg"
+                  style={{ width: displayWidth, height: displayHeight }}
+                />
+                
+                {/* Canvas overlay layer */}
                 <canvas
                   ref={canvasRef}
                   onClick={handleCanvasClick}
@@ -438,7 +509,7 @@ export function ImageWithBoundingBoxes({
                 />
 
                 {/* Popup overlay - positioned absolute relative to canvas */}
-                {hoveredFieldInternal && popupPosition && hoveredFieldData && (
+                {activeFieldName && popupPosition && hoveredFieldData && (
                   <div
                     className="absolute z-50 pointer-events-none"
                     style={{
@@ -450,7 +521,7 @@ export function ImageWithBoundingBoxes({
                           style={{
                             borderLeft: `2px solid ${getFieldColor(hoveredFieldData.field_name)}`,
                           }}>
-                      <div className="space-y-0.5">
+                  <div className="space-y-1">
                         <div className="flex items-center justify-between gap-1">
                           <Badge
                             variant="secondary"
@@ -463,7 +534,7 @@ export function ImageWithBoundingBoxes({
                           </span>
                         </div>
 
-                        <div className="text-[10px] text-white leading-tight max-h-8 overflow-y-auto font-medium bg-white/10 p-1 rounded backdrop-blur-sm">
+                        <div className="text-[10px] text-white leading-tight max-h-12 overflow-y-auto font-medium bg-white/10 p-1 rounded backdrop-blur-sm">
                           {String(hoveredFieldData.value) || 'No value detected'}
                         </div>
 
@@ -471,6 +542,13 @@ export function ImageWithBoundingBoxes({
                         <div className="text-[8px] text-white/80 font-medium text-center">
                           {hoveredFieldData.bounding_boxes?.length || 0} region{(hoveredFieldData.bounding_boxes?.length || 0) !== 1 ? 's' : ''} mapped
                         </div>
+
+                        {/* Reasoning snippet */}
+                        {hoveredFieldData.reasoning && (
+                          <div className="text-[9px] text-white/90 bg-white/10 p-1 rounded mt-1 max-h-16 overflow-y-auto">
+                            {hoveredFieldData.reasoning}
+                          </div>
+                        )}
                       </div>
                     </Card>
                   </div>

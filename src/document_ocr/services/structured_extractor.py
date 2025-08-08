@@ -382,6 +382,11 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
                 for key, child in node.items():
                     new_prefix = f"{prefix}.{key}" if prefix else str(key)
                     walk(new_prefix, child)
+            elif isinstance(node, list):
+                # Support list structures within field_mappings by indexing items
+                for idx, child in enumerate(node):
+                    new_prefix = f"{prefix}[{idx}]" if prefix else f"[{idx}]"
+                    walk(new_prefix, child)
 
         walk("", field_mappings)
         return grounded_fields
@@ -463,6 +468,11 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
             if isinstance(node, dict):
                 for key, child in node.items():
                     new_prefix = f"{prefix}.{key}" if prefix else str(key)
+                    walk(new_prefix, child)
+            elif isinstance(node, list):
+                # Support list structures within field_mappings by indexing items
+                for idx, child in enumerate(node):
+                    new_prefix = f"{prefix}[{idx}]" if prefix else f"[{idx}]"
                     walk(new_prefix, child)
 
         walk("", field_mappings)
