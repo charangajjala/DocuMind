@@ -14,6 +14,7 @@ from ..models.domain import DocumentOCRResult, TextBlock
 from ..prompts.system_prompts import get_extraction_system_prompt, get_enhanced_system_prompt
 from ..prompts.user_prompts import get_base_extraction_prompt
 from ..prompts.document_type_prompts import get_schema_specific_prompt
+from ..prompts.text_only_prompts import get_text_only_user_override
 
 
 logger = logging.getLogger(__name__)
@@ -227,6 +228,86 @@ class AzureOpenAIService(LLMProvider):
         except Exception as e:
             logger.error(f"Azure OpenAI extraction failed: {e}")
             raise AzureOpenAIError(f"Failed to extract structured data: {e}")
+
+    async def extract_structured_data_from_text(
+        self,
+        full_text: str,
+        json_schema: Optional[Dict[str, Any]] = None,
+        user_prompt: Optional[str] = None,
+        document_type: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Extract structured data using text-only (no image, no OCR blocks/bboxes).
+
+        The LLM returns extracted_data and reasoning, but no visual grounding. We normalize array mappings
+        the same way as in the vision flow.
+        """
+        try:
+            # Build a lean system prompt that includes only full OCR text and (optional) schema
+            schema_section = json.dumps(json_schema, indent=2) if json_schema else None
+            system_prompt_parts = [
+                "You are a precise information extraction assistant.",
+                "You will ONLY receive raw OCR text (no images or bounding boxes).",
+                "Extract structured data according to the user's schema/instructions and return JSON matching the RESPONSE FORMAT SCHEMA provided in the user prompt.",
+                f"OCR Full Text (verbatim):\n{full_text[:120000]}"  # hard cap to avoid excessively long prompts
+            ]
+            if document_type:
+                system_prompt_parts.insert(1, f"Document Type: {document_type}")
+            if schema_section:
+                system_prompt_parts.append(f"Data Extraction Schema (what to extract):\n{schema_section}")
+            system_prompt = "\n\n".join(system_prompt_parts)
+
+            # Create user prompt that embeds the response schema and rules (reuse the same base prompt generator)
+            final_user_prompt = self._create_user_prompt(user_prompt, json_schema)
+            # TEXT-ONLY OVERRIDE: appended via dedicated helper for modularity
+            final_user_prompt = f"{final_user_prompt}\n{get_text_only_user_override(document_type)}"
+
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": final_user_prompt},
+            ]
+
+            # Token estimates (rough)
+            def _approx(text: str) -> int:
+                return max(0, (len(text) // 4))
+            system_tokens = _approx(system_prompt)
+            user_tokens = _approx(final_user_prompt)
+
+            response = await self.client.chat.completions.create(
+                model=self.deployment,
+                messages=messages,
+                response_format={"type": "json_object"}
+            )
+
+            raw_llm_response = response.choices[0].message.content
+            logger.info(f"Raw LLM response (text-only): {raw_llm_response}")
+            llm_full_response = json.loads(raw_llm_response)
+
+            # Remove any field_mappings if the model returned them; we will compute grounding locally
+            if "field_mappings" in llm_full_response:
+                try:
+                    del llm_full_response["field_mappings"]
+                except Exception:
+                    pass
+
+            llm_full_response["prompts_used"] = {
+                "system_prompt": system_prompt,
+                "user_prompt": final_user_prompt,
+                "token_estimates": {
+                    "system_prompt_tokens": system_tokens,
+                    "user_prompt_tokens": user_tokens,
+                    "image_input_tokens": 0,
+                    "total_estimated_input_tokens": system_tokens + user_tokens,
+                },
+                "subset_block_count": 0,
+            }
+            llm_full_response["raw_llm_response"] = raw_llm_response
+            return llm_full_response
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse Azure OpenAI response as JSON: {e}")
+            raise AzureOpenAIError(f"Invalid JSON response from Azure OpenAI: {e}")
+        except Exception as e:
+            logger.error(f"Azure OpenAI extraction (text-only) failed: {e}")
+            raise AzureOpenAIError(f"Failed to extract structured data (text-only): {e}")
     
     def _create_system_prompt(
         self,

@@ -98,6 +98,34 @@ export class ApiService {
     return this.handleResponse<ExtractionResult>(response);
   }
 
+  static async extractStructuredDataOCROnly(
+    imageData: string,
+    jsonSchema?: any,
+    userPrompt?: string,
+    llmModel?: 'gpt-40' | 'gpt-o4-mini' | 'gpt-5-mini' | 'gpt-5-nano'
+  ): Promise<ExtractionResult> {
+    if (!jsonSchema && !userPrompt) {
+      throw new Error('Either jsonSchema or userPrompt must be provided');
+    }
+
+    const request: StructuredExtractionRequest = {
+      image_data: imageData,
+      json_schema: jsonSchema,
+      user_prompt: userPrompt,
+      llm_model: llmModel,
+    };
+
+    const response = await fetch(`${API_BASE_URL}/extract/structured/ocr-only`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    });
+
+    return this.handleResponse<ExtractionResult>(response);
+  }
+
   static async validateSchema(schema: any): Promise<any> {
     const response = await fetch(`${API_BASE_URL}/schema/validate`, {
       method: 'POST',

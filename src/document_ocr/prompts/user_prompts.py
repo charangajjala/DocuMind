@@ -79,7 +79,7 @@ RESPONSE REQUIREMENTS:
 
 {response_schema}
 
-FIELD MAPPING RULES:
+FIELD MAPPING RULES (SKIP IN TEXT-ONLY MODE):
 • Map each field to the MOST SPECIFIC OCR text block(s) that contain the complete value.
   - If one block contains the complete value → use a single integer block id in source_block_id
   - If multiple smallest blocks together contain the value (e.g., multi-line) → use a list of integer block ids in source_block_id
