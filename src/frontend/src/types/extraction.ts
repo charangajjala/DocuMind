@@ -34,4 +34,5 @@ export interface StructuredExtractionRequest {
   json_schema?: any;
   user_prompt?: string;
   document_type?: string;
+  llm_model?: 'gpt-40' | 'gpt-o4-mini' | 'gpt-5-mini' | 'gpt-5-nano';
 }

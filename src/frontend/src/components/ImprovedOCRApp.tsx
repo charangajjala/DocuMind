@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { FileUpload } from '@/components/FileUpload';
 import { ModeToggle } from '@/components/mode-toggle';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -56,6 +57,7 @@ export function ImprovedOCRApp() {
     subset_block_count?: number;
   } | null>(null);
   const [rawLlmResponse, setRawLlmResponse] = useState<string | null>(null);
+  const [llmModel, setLlmModel] = useState<'gpt-40' | 'gpt-o4-mini' | 'gpt-5-mini' | 'gpt-5-nano'>('gpt-5-mini');
 
   // Computed states
   const hasOCRResults = ocrResults !== null;
@@ -154,7 +156,7 @@ export function ImprovedOCRApp() {
         timestamp: new Date().toISOString()
       });
       
-      const response = await ApiService.extractStructuredData(base64Data, jsonSchema, prompt);
+      const response = await ApiService.extractStructuredData(base64Data, jsonSchema, prompt, llmModel);
       
       console.log('✅ Structured Extraction Response from backend:', response);
       
@@ -274,6 +276,20 @@ export function ImprovedOCRApp() {
                 >
                   Azure OpenAI: {azureConfigStatus}
                 </Badge>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Model</span>
+                  <Select value={llmModel} onValueChange={(v) => setLlmModel(v as any)}>
+                    <SelectTrigger className="h-8 w-40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="gpt-5-mini">gpt-5-mini</SelectItem>
+                      <SelectItem value="gpt-40">gpt-40</SelectItem>
+                      <SelectItem value="gpt-o4-mini">gpt-o4-mini</SelectItem>
+                      <SelectItem value="gpt-5-nano">gpt-5-nano</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <ModeToggle />
               </div>
             </div>

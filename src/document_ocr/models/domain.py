@@ -168,6 +168,7 @@ class StructuredExtractionRequest(BaseModel):
     user_prompt: Optional[str] = None  # Additional user instructions
     document_type: Optional[str] = None  # Document type hint for specialized prompts
     confidence_threshold: float = 0.8
+    llm_model: Optional[str] = None  # e.g., 'gpt-40', 'gpt-o4-mini', 'gpt-5-mini', 'gpt-5-nano'
     
     @model_validator(mode='after')
     def validate_schema_or_prompt(self):

@@ -181,8 +181,6 @@ class AzureOpenAIService(LLMProvider):
             response = await self.client.chat.completions.create(
                 model=self.deployment,
                 messages=messages,
-                temperature=0.1,  # Low temperature for consistent extraction
-                max_tokens=4000,
                 response_format={"type": "json_object"}
             )
             

@@ -69,7 +69,12 @@ export class ApiService {
     return this.handleResponse<OCRResponse>(response);
   }
 
-  static async extractStructuredData(imageData: string, jsonSchema?: any, userPrompt?: string): Promise<ExtractionResult> {
+  static async extractStructuredData(
+    imageData: string,
+    jsonSchema?: any,
+    userPrompt?: string,
+    llmModel?: 'gpt-40' | 'gpt-o4-mini' | 'gpt-5-mini' | 'gpt-5-nano'
+  ): Promise<ExtractionResult> {
     // Validate that at least one of schema or prompt is provided
     if (!jsonSchema && !userPrompt) {
       throw new Error('Either jsonSchema or userPrompt must be provided');
@@ -79,6 +84,7 @@ export class ApiService {
       image_data: imageData,
       json_schema: jsonSchema,
       user_prompt: userPrompt,
+      llm_model: llmModel,
     };
 
     const response = await fetch(`${API_BASE_URL}/extract/structured`, {

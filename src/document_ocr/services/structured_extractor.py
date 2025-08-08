@@ -48,6 +48,47 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
         self.llm_provider = llm_provider
         self.schema_validator = schema_validator
         self.selector = SafeOCRSelector()
+
+    def _normalize_text(self, text: Any) -> str:
+        try:
+            s = str(text).lower().strip()
+        except Exception:
+            return ""
+        import re
+        return re.sub(r"\s+", " ", s)
+
+    def _enforce_single_block_if_possible(
+        self,
+        value: Any,
+        ids: List[int],
+        ocr_results: DocumentOCRResult
+    ) -> List[int]:
+        """If any single OCR block contains the complete value, prefer that single block.
+        Otherwise, keep the provided list (for true multi-block spans).
+        """
+        if len(ids) <= 1:
+            return ids
+
+        value_norm = self._normalize_text(value)
+        if not value_norm:
+            return ids
+
+        # Specificity ranking
+        specificity = {"token": 4, "line": 3, "paragraph": 2, "block": 1}
+
+        best_idx = None
+        best_score = -1.0
+        for i, block in enumerate(ocr_results.text_blocks):
+            block_text_norm = self._normalize_text(block.text)
+            if value_norm and block_text_norm and value_norm in block_text_norm:
+                score = specificity.get(getattr(block, "element_type", "block"), 1) * 10 + float(getattr(block, 'confidence', 0) or 0)
+                if score > best_score:
+                    best_score = score
+                    best_idx = i
+
+        if best_idx is not None:
+            return [best_idx]
+        return ids
     
     
     async def extract_with_visual_grounding(
@@ -56,7 +97,8 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
         mime_type: str,
         json_schema: Optional[Dict[str, Any]] = None,
         user_prompt: Optional[str] = None,
-        document_type: Optional[str] = None
+        document_type: Optional[str] = None,
+        llm_provider_override: Optional[LLMProvider] = None
     ) -> StructuredExtractionResult:
         """Extract structured data with visual grounding.
         
@@ -108,7 +150,8 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
 
             # Step 4: Extract structured data using LLM (with subset)
             logger.info("Extracting structured data with LLM")
-            llm_response = await self.llm_provider.extract_structured_data(
+            provider = llm_provider_override or self.llm_provider
+            llm_response = await provider.extract_structured_data(
                 image_data=image_data,
                 ocr_results=subset_ocr,  # Use safe subset for LLM
                 json_schema=json_schema,
@@ -366,42 +409,7 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
                     deduped.append(i)
             return deduped
 
-        def _normalize_text(text: Any) -> str:
-            try:
-                s = str(text).lower().strip()
-            except Exception:
-                return ""
-            # Collapse whitespace
-            import re
-            return re.sub(r"\s+", " ", s)
-
-        def enforce_single_block_if_possible(value: Any, ids: List[int]) -> List[int]:
-            """If any single OCR block contains the complete value, prefer that single block.
-            Otherwise, keep the provided list (for true multi-block spans)."""
-            # If LLM already chose single, keep it
-            if len(ids) <= 1:
-                return ids
-
-            value_norm = _normalize_text(value)
-            if not value_norm:
-                return ids
-
-            # Specificity ranking
-            specificity = {"token": 4, "line": 3, "paragraph": 2, "block": 1}
-
-            best_idx = None
-            best_score = -1.0
-            for i, block in enumerate(ocr_results.text_blocks):
-                block_text_norm = _normalize_text(block.text)
-                if value_norm and block_text_norm and value_norm in block_text_norm:
-                    score = specificity.get(getattr(block, "element_type", "block"), 1) * 10 + float(block.confidence or 0)
-                    if score > best_score:
-                        best_score = score
-                        best_idx = i
-
-            if best_idx is not None:
-                return [best_idx]
-            return ids
+        # local helpers removed; using class-level enforcement to avoid linter scope issues
 
         def walk(prefix: str, node: Any):
             # Include array-level reasoning-only entries as separate fields
@@ -426,7 +434,7 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
                 reasoning = field_info.get("reasoning")
                 
                 source_block_ids = normalize_ids(field_info)
-                source_block_ids = enforce_single_block_if_possible(value, source_block_ids)
+                source_block_ids = self._enforce_single_block_if_possible(value, source_block_ids, ocr_results)
 
                 # Build bounding boxes from normalized ids
                 bounding_boxes: List[BoundingBox] = []
@@ -534,7 +542,7 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
                     reasoning = find_array_reasoning(field_name)
                 
                 normalized_ids = normalize_ids(field_info)
-                normalized_ids = enforce_single_block_if_possible(value, normalized_ids)
+                normalized_ids = self._enforce_single_block_if_possible(value, normalized_ids, ocr_results)
 
                 # Determine extraction source based on ids
                 extraction_source = self._determine_extraction_source(normalized_ids)
