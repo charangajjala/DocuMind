@@ -1,6 +1,8 @@
 import { useCallback, useState, useRef, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ZoomIn, ZoomOut, RotateCcw, Eye, FileText } from 'lucide-react';
@@ -59,6 +61,8 @@ export function OCRVisualization({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [scrollStart, setScrollStart] = useState({ x: 0, y: 0 });
   const [isCanvasActive, setIsCanvasActive] = useState(false);
+  const AVAILABLE_TYPES = ['block','paragraph','line','token'];
+  const [selectedTypes, setSelectedTypes] = useState<string[]>(AVAILABLE_TYPES);
 
   // Derived state
   const hoveredBlockIndex = hoveredBlock;
@@ -67,7 +71,15 @@ export function OCRVisualization({
     : (hoveredBlockIndex !== undefined && hoveredBlockIndex !== null
         ? hoveredBlockIndex
         : internalHoveredBlock);
-  const filteredBlocks = textBlocks;
+  const filteredBlocks = textBlocks.filter(b => selectedTypes.includes(b.element_type));
+
+  const toggleType = (type: string) => {
+    setSelectedTypes(prev => prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]);
+  };
+  const allSelected = selectedTypes.length === AVAILABLE_TYPES.length;
+  const noneSelected = selectedTypes.length === 0;
+  const selectAll = () => setSelectedTypes(AVAILABLE_TYPES);
+  const clearAll = () => setSelectedTypes([]);
 
   // Calculate base scale to fit image nicely in viewport (around 800px wide max)
   // Scale calculation based on container size
@@ -343,24 +355,26 @@ export function OCRVisualization({
 
   return (
     <div className="h-full flex flex-col space-y-4 min-w-0">
-      {/* Element Type Legend */}
-      <div className="flex flex-wrap gap-1 justify-center mb-3 flex-shrink-0">
-        {Object.entries(TEXT_ELEMENT_COLORS).map(([type, color]) => (
-          type !== 'default' && (
-            <Badge
-              key={type}
-              variant="outline"
-              className="flex items-center space-x-1 text-xs h-6"
-              style={{ borderColor: color }}
-            >
-              <div
-                className="w-1.5 h-1.5 rounded-full"
-                style={{ backgroundColor: color }}
+      {/* Element Type Filter */}
+      <div className="flex flex-col gap-2 mb-2 flex-shrink-0">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-medium">Filter by element type</div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={selectAll} disabled={allSelected}>All</Button>
+            <Button size="sm" variant="outline" onClick={clearAll} disabled={noneSelected}>None</Button>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          {AVAILABLE_TYPES.map((type) => (
+            <label key={type} className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={selectedTypes.includes(type)}
+                onCheckedChange={() => toggleType(type)}
               />
               <span className="capitalize">{type}</span>
-            </Badge>
-          )
-        ))}
+            </label>
+          ))}
+        </div>
       </div>
 
       {/* Main Two-Panel Layout */}
@@ -514,7 +528,7 @@ export function OCRVisualization({
                       {imageNaturalSize.width} × {imageNaturalSize.height} px
                     </span>
                     <span>
-                      {filteredBlocks.length} text blocks visible
+                      {filteredBlocks.length} visible
                     </span>
                     <span>
                       Scale: {Math.round(baseScale * zoomLevel * 100)}%
@@ -538,7 +552,7 @@ export function OCRVisualization({
             <CardContent className="p-0 flex-1 min-h-0">
               <ScrollArea className="h-full">
                 <div className="space-y-2 p-4">
-                  {textBlocks.length === 0 ? (
+                  {filteredBlocks.length === 0 ? (
                     <div className="text-center text-muted-foreground py-8">
                       <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
                       <p className="text-lg font-medium mb-2">No text elements detected</p>
@@ -547,7 +561,7 @@ export function OCRVisualization({
                       </p>
                     </div>
                   ) : (
-                    textBlocks.map((block, index) => (
+                    filteredBlocks.map((block, index) => (
                       <Card
                         key={index}
                         className={cn(

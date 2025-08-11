@@ -66,5 +66,24 @@ class TextOnlyExtractionResponse(BaseModel):
         ),
     )
 
+class HybridStage1Response(TextOnlyExtractionResponse):
+    """Alias for clarity in the hybrid pipeline (stage 1 = text-only extraction)."""
+    pass
+
+class HybridStage2LLMResponse(BaseModel):
+    """LLM response for hybrid stage 2 (grounding from filtered OCR blocks, no image).
+
+    The model must return field_mappings keyed by fully-qualified paths, using only the provided
+    filtered OCR block ids in source_block_id/source_block_ids. Do NOT return extracted_data again.
+    """
+
+    field_mappings: Dict[str, FieldMapping] = Field(
+        default_factory=dict,
+        description=(
+            "Mapping from fully-qualified field paths to mapping info. Keys MUST use dot/bracket notation. "
+            "Only use provided filtered OCR block ids for grounding; otherwise 'visual_only'."
+        ),
+    )
+
 # JSON schema for the model
 EXTRACTION_RESPONSE_SCHEMA = ExtractionResponse.model_json_schema()

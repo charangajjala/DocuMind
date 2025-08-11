@@ -19,7 +19,6 @@ import {
   BarChart3
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 
 interface StructuredExtractionProps {
   imageData: string; // base64 encoded image
@@ -37,7 +36,8 @@ export function StructuredExtraction({
   const [userPrompt, setUserPrompt] = useState('');
   const [selectedField, setSelectedField] = useState<string | null>(null);
   const [llmModel, setLlmModel] = useState<'gpt-40' | 'gpt-o4-mini' | 'gpt-5-mini' | 'gpt-5-nano'>('gpt-5-mini');
-  const [useManualGrounding, setUseManualGrounding] = useState<boolean>(false);
+  type GroundingMode = 'ai' | 'manual' | 'hybrid';
+  const [groundingMode, setGroundingMode] = useState<GroundingMode>('ai');
 
   const extractStructuredData = useCallback(async () => {
     // Validate that at least one of schema or prompt is provided
@@ -63,9 +63,14 @@ export function StructuredExtraction({
     setResult(null);
 
     try {
-      const extractionResult = useManualGrounding
-        ? await ApiService.extractStructuredDataOCROnly(imageData, schema, userPrompt || undefined, llmModel)
-        : await ApiService.extractStructuredData(imageData, schema, userPrompt || undefined, llmModel);
+      let extractionResult: ExtractionResult;
+      if (groundingMode === 'manual') {
+        extractionResult = await ApiService.extractStructuredDataOCROnly(imageData, schema, userPrompt || undefined, llmModel);
+      } else if (groundingMode === 'hybrid') {
+        extractionResult = await ApiService.extractStructuredDataHybrid(imageData, schema, userPrompt || undefined, llmModel);
+      } else {
+        extractionResult = await ApiService.extractStructuredData(imageData, schema, userPrompt || undefined, llmModel);
+      }
       setResult(extractionResult);
       onExtractionComplete(extractionResult);
 
@@ -85,7 +90,7 @@ export function StructuredExtraction({
     } finally {
       setIsExtracting(false);
     }
-  }, [imageData, schema, userPrompt, onExtractionComplete, llmModel, useManualGrounding]);
+  }, [imageData, schema, userPrompt, onExtractionComplete, llmModel, groundingMode]);
 
   const exportResults = () => {
     if (!result) return;
@@ -240,11 +245,20 @@ export function StructuredExtraction({
             </p>
           </div>
 
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <span className="text-sm font-medium">Manual Grounding</span>
-              <Switch checked={useManualGrounding} onCheckedChange={setUseManualGrounding} />
-            </div>
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2">
+                <span className="text-sm font-medium">Grounding Mode</span>
+                <Select value={groundingMode} onValueChange={(v) => setGroundingMode(v as GroundingMode)}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ai">AI-powered</SelectItem>
+                    <SelectItem value="manual">Manual</SelectItem>
+                    <SelectItem value="hybrid">Hybrid</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             <div className="flex items-center space-x-2">
               <label className="text-sm font-medium">Model</label>
               <Select value={llmModel} onValueChange={(v) => setLlmModel(v as any)}>

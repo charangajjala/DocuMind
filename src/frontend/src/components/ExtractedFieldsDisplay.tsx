@@ -96,6 +96,20 @@ export function ExtractedFieldsDisplay({
     };
   };
 
+  // Aggregate info for array containers: average confidence across children and total regions
+  const getArrayAggregate = (path: string) => {
+    const children = (grounded_fields || []).filter((g: any) => typeof g.field_name === 'string' && g.field_name.startsWith(`${path}[`));
+    const confidences: number[] = [];
+    let totalRegions = 0;
+    for (const g of children) {
+      const c = Number(g.confidence);
+      if (!Number.isNaN(c)) confidences.push(c);
+      totalRegions += Array.isArray(g.bounding_boxes) ? g.bounding_boxes.length : 0;
+    }
+    const avgConfidence = confidences.length ? confidences.reduce((a, b) => a + b, 0) / confidences.length : null;
+    return { avgConfidence, totalRegions } as { avgConfidence: number | null; totalRegions: number };
+  };
+
   // Try to resolve reasoning for a path with fallbacks to array-level patterns
   const getReasoningForPath = (path: string): string | null => {
     // 1) Exact match
@@ -140,6 +154,7 @@ export function ExtractedFieldsDisplay({
     const type = Array.isArray(value) ? 'array' : (value !== null && typeof value === 'object' ? 'object' : typeof value);
     const valuePreview = !isContainer ? String(value) : (Array.isArray(value) ? `[${(value as any[]).length}]` : `{${Object.keys(value || {}).length}}`);
     const reasoningText = getReasoningForPath(path);
+    const arrayAgg = Array.isArray(value) ? getArrayAggregate(path) : null;
 
     return (
       <div
@@ -202,6 +217,14 @@ export function ExtractedFieldsDisplay({
             <>
               <Badge variant="secondary" className="text-[10px] px-1 py-0">{Math.round(grounded.confidence * 100)}%</Badge>
               <Badge variant="outline" className="text-[10px] px-1 py-0">{grounded.regions} region{grounded.regions !== 1 ? 's' : ''}</Badge>
+            </>
+          )}
+          {!grounded && Array.isArray(value) && arrayAgg && (arrayAgg.avgConfidence !== null || arrayAgg.totalRegions > 0) && (
+            <>
+              {arrayAgg.avgConfidence !== null && (
+                <Badge variant="secondary" className="text-[10px] px-1 py-0">{Math.round(arrayAgg.avgConfidence * 100)}%</Badge>
+              )}
+              <Badge variant="outline" className="text-[10px] px-1 py-0">{arrayAgg.totalRegions} region{arrayAgg.totalRegions !== 1 ? 's' : ''}</Badge>
             </>
           )}
           {!isContainer && (
@@ -374,6 +397,16 @@ export function ExtractedFieldsDisplay({
                   <p className="text-sm font-semibold text-blue-600">
                     {processing_time?.toFixed(1)}s
                   </p>
+                  {(structuredResults.timers || structuredResults.llm_model_used) && (
+                    <div className="mt-1 grid grid-cols-3 gap-1 text-[10px] text-muted-foreground">
+                      {structuredResults.timers && <div>OCR {(structuredResults.timers.ocr_ms/1000).toFixed(2)}s</div>}
+                      {structuredResults.timers && <div>LLM {(structuredResults.timers.llm_ms/1000).toFixed(2)}s</div>}
+                      {structuredResults.timers && <div>Post {(structuredResults.timers.post_ms/1000).toFixed(2)}s</div>}
+                      {structuredResults.llm_model_used && (
+                        <div className="col-span-3 text-[10px]">Model: {structuredResults.llm_model_used}</div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </CardContent>

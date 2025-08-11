@@ -16,6 +16,30 @@ export interface GroundedField {
   visual_description?: string;
 }
 
+export interface PromptEstimates {
+  system_prompt_tokens: number;
+  user_prompt_tokens: number;
+  image_input_tokens: number;
+  total_estimated_input_tokens: number;
+}
+
+export interface StagePrompts {
+  system_prompt?: string;
+  user_prompt?: string;
+  token_estimates?: PromptEstimates;
+  filtered_block_count?: number; // stage2 only
+}
+
+export interface PromptsUsed {
+  system_prompt?: string;
+  user_prompt?: string;
+  token_estimates?: PromptEstimates;
+  subset_block_count?: number;
+  mode?: string;
+  stage1?: StagePrompts;
+  stage2?: StagePrompts;
+}
+
 export interface ExtractionResult {
   success: boolean;
   extracted_data: any;
@@ -27,6 +51,7 @@ export interface ExtractionResult {
   errors: string[];
   error_message?: string;
   raw_llm_response?: string;
+  prompts_used?: PromptsUsed;
 }
 
 export interface StructuredExtractionRequest {
@@ -35,4 +60,5 @@ export interface StructuredExtractionRequest {
   user_prompt?: string;
   document_type?: string;
   llm_model?: 'gpt-40' | 'gpt-o4-mini' | 'gpt-5-mini' | 'gpt-5-nano';
+  allowed_element_types?: Array<'block' | 'paragraph' | 'line' | 'token'>;
 }

@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { FileUpload } from '@/components/FileUpload';
 import { ModeToggle } from '@/components/mode-toggle';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -48,10 +49,18 @@ export function EnhancedOCRApp() {
   const [schema, setSchema] = useState<Array<{id: string, name: string, description: string, type: string}>>([]);
   const [isExtractingData, setIsExtractingData] = useState(false);
   const [azureConfigStatus, setAzureConfigStatus] = useState<'checking' | 'configured' | 'not-configured'>('checking');
+  const AVAILABLE_TYPES = ['block','paragraph','line','token'];
+  const [selectedTypes, setSelectedTypes] = useState<string[]>(AVAILABLE_TYPES);
 
   // Computed states
   const hasOCRResults = ocrResults !== null;
   const hasStructuredResults = structuredResults !== null;
+  const filteredTextBlocks = hasOCRResults ? ocrResults!.text_blocks.filter(b => selectedTypes.includes(b.element_type)) : [];
+  const allSelected = selectedTypes.length === AVAILABLE_TYPES.length;
+  const noneSelected = selectedTypes.length === 0;
+  const toggleType = (type: string) => setSelectedTypes(prev => prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]);
+  const selectAll = () => setSelectedTypes(AVAILABLE_TYPES);
+  const clearAll = () => setSelectedTypes([]);
 
   const handleFileSelect = useCallback((file: File) => {
     setSelectedFile(file);
@@ -521,7 +530,7 @@ export function EnhancedOCRApp() {
                           </Card>
                         </div>
 
-                        {/* Text Blocks List */}
+                        {/* Text Blocks List */
                         <div className="lg:col-span-1">
                           <Card className="border-0 shadow-lg h-fit max-h-[600px]">
                             <CardHeader>
@@ -531,15 +540,32 @@ export function EnhancedOCRApp() {
                                   <span>Text Blocks</span>
                                 </div>
                                 <Badge variant="secondary">
-                                  {ocrResults.text_blocks.length}
+                                  {filteredTextBlocks.length}
                                 </Badge>
                               </CardTitle>
+                              <div className="mt-2 space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs text-muted-foreground">Filter by type</span>
+                                  <div className="flex items-center gap-2">
+                                    <Button size="sm" variant="outline" onClick={selectAll} disabled={allSelected}>All</Button>
+                                    <Button size="sm" variant="outline" onClick={clearAll} disabled={noneSelected}>None</Button>
+                                  </div>
+                                </div>
+                                <div className="flex flex-wrap gap-3">
+                                  {AVAILABLE_TYPES.map((type) => (
+                                    <label key={type} className="flex items-center gap-2 text-xs">
+                                      <Checkbox checked={selectedTypes.includes(type)} onCheckedChange={() => toggleType(type)} />
+                                      <span className="capitalize">{type}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
                             </CardHeader>
                             <CardContent className="p-0">
                               <ScrollArea className="h-[500px]">
                                 <div className="p-6 space-y-3">
                                   {ocrResults ? (
-                                    ocrResults.text_blocks.map((block, index) => (
+                                    filteredTextBlocks.map((block, index) => (
                                       <div
                                         key={index}
                                         className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors cursor-pointer"

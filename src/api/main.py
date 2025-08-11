@@ -18,6 +18,7 @@ from document_ocr.services.schema_validator import JSONSchemaValidator
 from document_ocr.utils.config import EnvironmentConfigProvider
 from document_ocr.core.exceptions import DocumentOCRError, InvalidImageError
 from document_ocr.services.manual_grounding import ManualVisualGrounder
+from document_ocr.services.hybrid_service import HybridGroundingService
 
 
 # Initialize dependencies
@@ -29,6 +30,7 @@ structured_extractor = None
 llm_providers = {}
 default_llm_model = 'gpt-5-mini'
 manual_grounder = ManualVisualGrounder()
+hybrid_service = None
 try:
     # Discover available model configs
     available = config.list_available_llm_models(['gpt-40', 'gpt-o4-mini', 'gpt-5-mini', 'gpt-5-nano'])
@@ -67,6 +69,8 @@ try:
             llm_provider=llm_providers[default_llm_model],
             schema_validator=schema_validator
         )
+        # Initialize hybrid service with default provider (we will select per-request if needed)
+        hybrid_service = HybridGroundingService(llm_providers[default_llm_model])
         print(f"✅ Azure OpenAI structured extraction initialized. Models: {list(llm_providers.keys())}, default='{default_llm_model}'")
     else:
         print("⚠️ Azure OpenAI not configured - structured extraction unavailable")
@@ -324,6 +328,14 @@ async def extract_structured_data(request: StructuredExtractionRequest):
         if provider is None:
             raise HTTPException(status_code=503, detail="No LLM providers are configured on the server")
 
+        # Reuse OCR from the initial step to avoid reprocessing
+        precomputed_ocr = None
+        try:
+            # Perform OCR once and pass it through; reuse same confidence threshold
+            precomputed_ocr = await processor.process_document(image_data, confidence_threshold=request.confidence_threshold)
+        except Exception:
+            precomputed_ocr = None
+
         # Extract structured data (override the provider per request)
         result = await structured_extractor.extract_with_visual_grounding(
             image_data=image_data,
@@ -331,7 +343,9 @@ async def extract_structured_data(request: StructuredExtractionRequest):
             json_schema=request.json_schema,
             user_prompt=request.user_prompt,
             document_type=request.document_type,
-            llm_provider_override=provider
+            llm_provider_override=provider,
+            allowed_element_types=request.allowed_element_types,
+            precomputed_ocr=precomputed_ocr
         )
         
         # Convert OCR results to API format
@@ -403,7 +417,9 @@ async def extract_structured_data(request: StructuredExtractionRequest):
             schema_validation_passed=result.schema_validation_passed,
             prompts_used=result.prompts_used,
             errors=result.errors,
-            raw_llm_response=result.raw_llm_response
+            raw_llm_response=result.raw_llm_response,
+            timers=result.timers,
+            llm_model_used=result.llm_model_used
         )
         
     except Exception as e:
@@ -454,12 +470,13 @@ async def extract_structured_data_ocr_only(request: StructuredExtractionRequest)
         if provider is None:
             raise HTTPException(status_code=503, detail="No LLM providers are configured on the server")
 
-        # LLM extraction from text only (no blocks/bboxes)
+        # LLM extraction from text + image (no OCR blocks passed to LLM)
         llm_response = await provider.extract_structured_data_from_text(
             full_text=ocr.full_text,
             json_schema=request.json_schema,
             user_prompt=request.user_prompt,
-            document_type=request.document_type
+            document_type=request.document_type,
+            image_data=image_data
         )
 
         extracted_data = llm_response.get("extracted_data", {})
@@ -480,7 +497,12 @@ async def extract_structured_data_ocr_only(request: StructuredExtractionRequest)
             else:
                 pseudo_mappings[prefix] = {"value": node}
         flatten("", extracted_data)
-        grounded_fields = manual_grounder.ground(extracted_data, pseudo_mappings, ocr)
+        # Optional anchors from schema property names to improve matching
+        try:
+            anchors = list((request.json_schema or {}).get('properties', {}).keys()) if request.json_schema else []
+        except Exception:
+            anchors = []
+        grounded_fields = manual_grounder.ground(extracted_data, pseudo_mappings, ocr, anchors=anchors)
 
         # Build OCR response
         ocr_response = OCRResponse(
@@ -521,10 +543,27 @@ async def extract_structured_data_ocr_only(request: StructuredExtractionRequest)
 
             # Attach compact reasoning from reasoning_map when available (array-level/type-level inheritance happens in UI)
             reasoning = reasoning_map.get(field.field_name)
+            # Confidence policy: OCR-grounded → average OCR confidences; visual_only → use LLM visual_only_confidence if provided
+            computed_conf = field.confidence
+            try:
+                if field.source_text_blocks and any(isinstance(bid, int) for bid in field.source_text_blocks):
+                    ocr_confs = []
+                    for bid in field.source_text_blocks:
+                        if isinstance(bid, int) and 0 <= bid < len(ocr.text_blocks):
+                            ocr_confs.append(float(ocr.text_blocks[bid].confidence))
+                    if ocr_confs:
+                        computed_conf = sum(ocr_confs) / len(ocr_confs)
+                else:
+                    vo = llm_response.get("visual_only_confidence", {}).get(field.field_name)
+                    if isinstance(vo, (int, float)):
+                        computed_conf = float(vo)
+            except Exception:
+                pass
+
             grounded_fields_api.append({
                 "field_name": field.field_name,
                 "value": field.value,
-                "confidence": field.confidence,
+                "confidence": computed_conf,
                 "source_text_blocks": field.source_text_blocks,
                 "reasoning": reasoning if reasoning is not None else field.reasoning,
                 "ocr_text_found": ocr_text_found,
@@ -546,7 +585,7 @@ async def extract_structured_data_ocr_only(request: StructuredExtractionRequest)
             processing_time=ocr.processing_time,
             llm_confidence=llm_confidence,
             schema_validation_passed=True if not request.json_schema else JSONSchemaValidator().validate_data(extracted_data, request.json_schema),
-            prompts_used=llm_response.get("prompts_used", {}),
+            prompts_used={"mode": "manual", **(llm_response.get("prompts_used", {}) or {})},
             errors=[],
             raw_llm_response=llm_response.get("raw_llm_response", None)
         )
@@ -570,6 +609,191 @@ async def extract_structured_data_ocr_only(request: StructuredExtractionRequest)
         )
 
 
+@app.post("/extract/structured/hybrid", response_model=StructuredExtractionResponse)
+async def extract_structured_data_hybrid(request: StructuredExtractionRequest):
+    """Hybrid RAG-style pipeline without image input to LLM.
+
+    Stage 1: text-only extraction → extracted_data + reasoning_map
+    Stage 2: filter OCR blocks using extracted_data/reasoning_map → LLM grounding from filtered blocks
+    """
+    if not structured_extractor:
+        raise HTTPException(
+            status_code=503,
+            detail="Azure OpenAI service not configured. Please set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT"
+        )
+    try:
+        # Decode base64 image
+        try:
+            image_data = base64.b64decode(request.image_data)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid base64 image data")
+
+        # OCR
+        ocr = await processor.process_document(image_data, confidence_threshold=request.confidence_threshold)
+
+        # Choose provider/model
+        requested_model = (request.llm_model or default_llm_model).strip().lower()
+        provider = llm_providers.get(requested_model) or llm_providers.get(default_llm_model)
+        if provider is None:
+            raise HTTPException(status_code=503, detail="No LLM providers are configured on the server")
+
+        # Stage 1: text-only extraction
+        stage1 = await provider.extract_structured_data_from_text(
+            full_text=ocr.full_text,
+            json_schema=request.json_schema,
+            user_prompt=request.user_prompt,
+            document_type=request.document_type,
+            image_data=image_data
+        )
+        extracted_data = stage1.get("extracted_data", {})
+        reasoning_map = stage1.get("reasoning_map", {})
+
+        # Filter OCR blocks
+        rag = HybridGroundingService(provider)
+        filtered_ids = rag._filter_blocks(extracted_data, reasoning_map, ocr)
+        # Ignore allowed_element_types in hybrid mode (filter is AI-only by design)
+
+        # Stage 2: LLM grounding from filtered blocks (no image)
+        stage2 = await rag.stage2_ground(extracted_data, ocr, filtered_ids)
+
+        # Process field mappings locally to build grounded fields
+        field_mappings = stage2.get("field_mappings", {})
+        grounded_fields_api = []
+        # Convert to API format using the same logic as other endpoints
+        for key, info in field_mappings.items():
+            value = extracted_data
+            # Resolve value by path if needed (simple split)
+            try:
+                path = key
+                # simplistic resolver
+                import re
+                def get_by_path(obj, path_str):
+                    cur = obj
+                    # split on dots and bracket indices
+                    tokens = re.findall(r"[^.\[\]]+|\[\d+\]", path_str)
+                    for t in tokens:
+                        if t.startswith('[') and t.endswith(']'):
+                            idx = int(t[1:-1])
+                            cur = cur[idx]
+                        else:
+                            cur = cur.get(t)
+                    return cur
+                value = get_by_path(extracted_data, path)
+            except Exception:
+                pass
+
+            sb = info.get("source_block_id")
+            sb_list = [] if sb is None else (sb if isinstance(sb, list) else [sb])
+            bboxes = []
+            ocr_text_found = None
+            texts = []
+            for bid in sb_list:
+                if isinstance(bid, int) and 0 <= bid < len(ocr.text_blocks):
+                    tb = ocr.text_blocks[bid]
+                    bboxes.append({"x_min": tb.bounding_box.x_min, "y_min": tb.bounding_box.y_min, "x_max": tb.bounding_box.x_max, "y_max": tb.bounding_box.y_max})
+                    texts.append(tb.text)
+            if texts:
+                ocr_text_found = " ".join(texts)
+
+            # Merge reasoning: stage1 semantic/location (reasoning_map) + stage2 block selection
+            merged_reasoning = None
+            try:
+                r1 = reasoning_map.get(key)
+                r2 = info.get("reasoning")
+                if r1 and r2:
+                    merged_reasoning = f"{r1}\n\nBlock selection: {r2}"
+                else:
+                    merged_reasoning = r1 or r2
+            except Exception:
+                merged_reasoning = info.get("reasoning") or reasoning_map.get(key)
+
+            grounded_fields_api.append({
+                "field_name": key,
+                "value": value,
+                # Confidence policy: prefer OCR average when grounded, else use stage1 visual_only_confidence if any
+                "confidence": (lambda: (
+                    (sum(float(ocr.text_blocks[bid].confidence) for bid in sb_list if isinstance(bid, int) and 0 <= bid < len(ocr.text_blocks)) / max(1, sum(1 for bid in sb_list if isinstance(bid, int) and 0 <= bid < len(ocr.text_blocks))))
+                    if (sb_list and any(isinstance(bid, int) for bid in sb_list))
+                    else (stage1.get("visual_only_confidence", {}) or {}).get(key, info.get("confidence", 0.0))
+                ))(),
+                "source_text_blocks": [bid for bid in sb_list if isinstance(bid, int)],
+                "reasoning": merged_reasoning,
+                "ocr_text_found": ocr_text_found,
+                "bounding_boxes": bboxes,
+            })
+
+        # Average confidence
+        confs = [float(f["confidence"]) for f in grounded_fields_api if isinstance(f.get("confidence"), (int, float))]
+        llm_confidence = sum(confs) / len(confs) if confs else 0.0
+
+        # OCR response
+        ocr_response = OCRResponse(
+            full_text=ocr.full_text,
+            text_blocks=[
+                {
+                    "text": block.text,
+                    "confidence": block.confidence,
+                    "element_type": getattr(block, 'element_type', 'block'),
+                    "bounding_box": {
+                        "x_min": block.bounding_box.x_min,
+                        "y_min": block.bounding_box.y_min,
+                        "x_max": block.bounding_box.x_max,
+                        "y_max": block.bounding_box.y_max
+                    }
+                }
+                for block in ocr.text_blocks
+            ],
+            image_dimensions={"width": ocr.image_width, "height": ocr.image_height},
+            processing_time=ocr.processing_time,
+            success=True
+        )
+
+        # Prepare prompts_used with mode and filtered block count
+        stage2_prompts = stage2.get("prompts_used", {}) or {}
+        stage2_prompts["filtered_block_count"] = len(filtered_ids)
+
+        import json as _json
+        return StructuredExtractionResponse(
+            success=True,
+            extracted_data=extracted_data,
+            grounded_fields=grounded_fields_api,
+            ocr_results=ocr_response,
+            processing_time=ocr.processing_time,
+            llm_confidence=llm_confidence,
+            schema_validation_passed=True if not request.json_schema else JSONSchemaValidator().validate_data(extracted_data, request.json_schema),
+            prompts_used={
+                "mode": "hybrid",
+                "stage1": stage1.get("prompts_used", {}),
+                "stage2": stage2_prompts,
+            },
+            errors=[],
+            raw_llm_response=_json.dumps({
+                "stage1": {
+                    "raw_llm_response": stage1.get("raw_llm_response"),
+                },
+                "stage2": {
+                    "raw_llm_response": stage2.get("raw_llm_response"),
+                }
+            }, indent=2)
+        )
+    except Exception as e:
+        return StructuredExtractionResponse(
+            success=False,
+            extracted_data={},
+            grounded_fields=[],
+            ocr_results=OCRResponse(
+                full_text="",
+                text_blocks=[],
+                image_dimensions={"width": 0, "height": 0},
+                processing_time=0.0,
+                success=False
+            ),
+            processing_time=0.0,
+            llm_confidence=0.0,
+            schema_validation_passed=False,
+            errors=[str(e)],
+            error_message=str(e)
+        )
 @app.post("/schema/validate")
 async def validate_schema(schema: dict):
     """Validate a JSON schema for structured extraction."""

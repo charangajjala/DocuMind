@@ -29,6 +29,7 @@ class ManualVisualGrounder:
         extracted_data: Dict[str, Any],
         field_mappings: Dict[str, Any],
         ocr_results: DocumentOCRResult,
+        anchors: Optional[List[str]] = None,
     ) -> List[GroundedDataField]:
         """Return grounded fields mirroring the existing output shape.
 
@@ -39,20 +40,53 @@ class ManualVisualGrounder:
 
         # Build a simple searchable list of (idx, text, norm_text)
         blocks = [(i, tb.text, _normalize_text(tb.text)) for i, tb in enumerate(ocr_results.text_blocks or [])]
+        anchor_set = {a.lower() for a in (anchors or []) if isinstance(a, str) and len(a) > 2}
+
+        def _build_number_regex(val: str) -> Optional[re.Pattern]:
+            # Accept 1,234.50 or 1 234,50 variations; tolerate spaces/commas
+            try:
+                _ = float(val.replace(',', ''))
+            except Exception:
+                return None
+            # Escape digits while allowing optional thousands separators and optional decimal part
+            # Convert the given number into a flexible pattern
+            parts = val.replace(',', '')
+            return re.compile(r"\b" + re.sub(r"(\d)(?=\d)", r"\\d[ ,]?", re.escape(parts)) + r"\b")
 
         def match_value_to_block_ids(value: Any) -> List[int]:
             target = _normalize_text(value)
             if not target:
                 return []
 
+            # Tolerant numeric matching
+            num_rx = _build_number_regex(str(value)) if isinstance(value, (int, float, str)) else None
+
             # Prefer line/paragraph text that contains the target as a contiguous substring
-            # We rely on the OCR result granularity already provided
-            matches: List[int] = []
             for idx, _raw, norm in blocks:
                 if target and target in norm:
-                    matches.append(idx)
-                    break
-            return matches
+                    return [idx]
+                if num_rx and num_rx.search(norm):
+                    return [idx]
+
+            # Try adjacent concatenations (merge up to next 2 blocks)
+            for i in range(len(blocks)):
+                merged = blocks[i][2]
+                ids = [blocks[i][0]]
+                for j in range(1, 3):
+                    if i + j < len(blocks):
+                        merged = merged + " " + blocks[i + j][2]
+                        ids.append(blocks[i + j][0])
+                        if target in merged or (num_rx and num_rx.search(merged)):
+                            return ids
+
+            # Anchor-based inclusion: if a block has multiple anchor tokens, accept as candidate
+            if anchor_set:
+                for idx, _raw, norm in blocks:
+                    hits = sum(1 for a in anchor_set if a in norm)
+                    if hits >= 2:
+                        return [idx]
+
+            return []
 
         # Walk field_mappings to produce grounded entries (array-level reasoning nodes are kept by caller)
         def walk(prefix: str, node: Any):
