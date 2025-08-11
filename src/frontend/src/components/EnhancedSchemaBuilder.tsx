@@ -395,6 +395,11 @@ export const EnhancedSchemaBuilder: React.FC<SchemaBuilderProps> = ({
             </Select>
           )}
 
+          {/* If array items are object, render hint to edit nested fields */}
+          {field.type === 'array' && field.items?.type === 'object' && (
+            <span className="text-[11px] text-slate-400">Configure nested fields under this array's "items" object below.</span>
+          )}
+
           {/* Description input */}
           <input
             value={field.description || ''}
@@ -446,6 +451,13 @@ export const EnhancedSchemaBuilder: React.FC<SchemaBuilderProps> = ({
             {Object.entries(field.properties).map(([objectKey, propField]) =>
               renderField(propField, fieldIndex, currentPath, depth + 1, objectKey)
             )}
+          </div>
+        )}
+
+        {/* Array items (object) rendering */}
+        {field.type === 'array' && field.items && field.items.type === 'object' && (
+          <div className="mt-2 ml-8">
+            {renderField(field.items, fieldIndex, currentPath, depth + 1, 'items')}
           </div>
         )}
       </div>
@@ -658,6 +670,20 @@ export const EnhancedSchemaBuilder: React.FC<SchemaBuilderProps> = ({
             required: false,
             description: prop.items.description || ''
           };
+
+          // If array of objects, map nested properties of items
+          if (prop.items.type === 'object' && prop.items.properties) {
+            field.items.properties = {} as Record<string, ComplexField>;
+            Object.entries(prop.items.properties).forEach(([nestedName, nestedProp]: [string, any]) => {
+              field.items!.properties![nestedName] = {
+                id: generateId(),
+                name: nestedName,
+                type: nestedProp.type || 'string',
+                required: prop.items.required?.includes(nestedName) || false,
+                description: nestedProp.description || ''
+              };
+            });
+          }
         }
 
         fields.push(field);

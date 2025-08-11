@@ -42,6 +42,7 @@ export function ImprovedOCRApp() {
   const [activeTab, setActiveTab] = useState<string>('upload');
   const [structuredResults, setStructuredResults] = useState<any>(null);
   const [schema, setSchema] = useState<any>(null);
+  const [schemaBuilderKey, setSchemaBuilderKey] = useState<number>(0);
   const [isExtractingData, setIsExtractingData] = useState(false);
   const [azureConfigStatus, setAzureConfigStatus] = useState<'checking' | 'configured' | 'not-configured'>('checking');
   const [hoveredField, setHoveredField] = useState<string | null>(null);
@@ -79,6 +80,40 @@ export function ImprovedOCRApp() {
   };
   const selectAllTypes = () => setAllowedElementTypes(AVAILABLE_TYPES);
   const clearAllTypes = () => setAllowedElementTypes([]);
+  // AI Schema Generator
+  const [schemaInstruction, setSchemaInstruction] = useState<string>('');
+  const [isGeneratingSchema, setIsGeneratingSchema] = useState<boolean>(false);
+  const generateSchemaWithAI = async () => {
+    if (!imageBase64 && !ocrResults?.full_text) return;
+    setIsGeneratingSchema(true);
+    setError('');
+    try {
+      const payload: { imageData?: string; fullText?: string } = {};
+      if (imageBase64) payload.imageData = imageBase64.split(',')[1];
+      if (ocrResults?.full_text) payload.fullText = ocrResults.full_text;
+      console.log('🧩 Schema Generation Request:', {
+        hasImage: !!payload.imageData,
+        hasFullText: !!payload.fullText,
+        instructionProvided: !!schemaInstruction,
+        llmModel,
+        timestamp: new Date().toISOString(),
+      });
+      const res = await ApiService.generateSchema(payload, schemaInstruction || undefined, llmModel);
+      console.log('🧩 Schema Generation Response:', res);
+      if (res.success && res.schema) {
+        setSchema(res.schema);
+        setSchemaBuilderKey((k) => k + 1); // force remount so builder re-initializes from new schema
+      } else {
+        setError(res.error_message || 'Failed to generate schema');
+        console.error('🧩 Schema Generation Error:', res.error_message || 'Unknown error');
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Failed to generate schema');
+      console.error('🧩 Schema Generation Exception:', e);
+    } finally {
+      setIsGeneratingSchema(false);
+    }
+  };
 
   // Computed states
   const hasOCRResults = ocrResults !== null;
@@ -508,7 +543,28 @@ export function ImprovedOCRApp() {
             {/* Schema Definition Tab */}
             <TabsContent value="extraction" className="space-y-6">
               <div className="max-w-6xl mx-auto space-y-6">
+                {/* AI Schema Generator */}
+                <Card className="border shadow-sm">
+                  <CardHeader>
+                    <CardTitle className="text-lg">AI Schema Generator</CardTitle>
+                    <CardDescription>
+                      Provide optional guidance and let the AI draft a JSON Schema from your document. You can refine it below.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      <Label htmlFor="schemaInstruction">Instructions (optional)</Label>
+                      <Textarea id="schemaInstruction" value={schemaInstruction} onChange={(e) => setSchemaInstruction(e.target.value)} rows={3} placeholder="e.g., Extract party names, dates, totals; use number for amounts; include an array of items with description and amount" />
+                      <div className="flex justify-end">
+                        <Button onClick={generateSchemaWithAI} disabled={isGeneratingSchema || (!imageBase64 && !ocrResults?.full_text)}>
+                          {isGeneratingSchema ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin" />Generating...</>) : 'Generate Schema with AI'}
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
                 <EnhancedSchemaBuilder
+                  key={schemaBuilderKey}
                   initialSchema={schema || undefined}
                   onSchemaChange={setSchema}
                 />

@@ -19,6 +19,10 @@ from ..prompts.text_only_prompts import (
     get_text_only_system_prompt,
     get_text_only_user_prompt,
 )
+from ..prompts.schema_generation_prompts import (
+    get_schema_generation_system_prompt,
+    build_schema_generation_user_text,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -316,6 +320,70 @@ class AzureOpenAIService(LLMProvider):
         except Exception as e:
             logger.error(f"Azure OpenAI extraction (text-only) failed: {e}")
             raise AzureOpenAIError(f"Failed to extract structured data (text-only): {e}")
+
+    async def generate_json_schema(
+        self,
+        image_data: Optional[bytes],
+        full_text: str,
+        instruction: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Generate a JSON Schema (draft) for the document using OCR full text and optional image.
+
+        Returns a dict with keys: schema, prompts_used, raw_llm_response, llm_model_used
+        """
+        try:
+            system_prompt = get_schema_generation_system_prompt()
+            user_text = build_schema_generation_user_text(full_text, instruction)
+
+            messages = [{"role": "system", "content": system_prompt}]
+            if image_data is not None:
+                image_b64 = base64.b64encode(image_data).decode('utf-8')
+                messages.append({
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_text},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{image_b64}", "detail": "high"}
+                        }
+                    ],
+                })
+            else:
+                messages.append({"role": "user", "content": user_text})
+
+            response = await self.client.chat.completions.create(
+                model=self.deployment,
+                messages=messages,
+                response_format={"type": "json_object"}
+            )
+            raw = response.choices[0].message.content
+            llm_json = json.loads(raw)
+
+            # In case the model returns schema under a top-level key, normalize
+            schema = llm_json.get("schema", llm_json)
+
+            def _approx(text: str) -> int:
+                return max(0, (len(text) // 4))
+            system_tokens = _approx(system_prompt)
+            user_tokens = _approx(user_text)
+
+            return {
+                "schema": schema,
+                "prompts_used": {
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_text,
+                    "token_estimates": {
+                        "system_prompt_tokens": system_tokens,
+                        "user_prompt_tokens": user_tokens,
+                    },
+                },
+                "raw_llm_response": raw,
+                "llm_model_used": self.deployment,
+            }
+        except json.JSONDecodeError as e:
+            raise AzureOpenAIError(f"Invalid JSON response while generating schema: {e}")
+        except Exception as e:
+            raise AzureOpenAIError(f"Failed to generate schema: {e}")
     
     def _create_system_prompt(
         self,

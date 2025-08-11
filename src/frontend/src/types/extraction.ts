@@ -54,6 +54,16 @@ export interface ExtractionResult {
   prompts_used?: PromptsUsed;
 }
 
+// Schema generation
+export interface SchemaGenerationResponse {
+  success: boolean;
+  schema?: any;
+  prompts_used?: PromptsUsed;
+  raw_llm_response?: string;
+  error_message?: string;
+  llm_model_used?: string;
+}
+
 export interface StructuredExtractionRequest {
   image_data: string; // base64 encoded
   json_schema?: any;

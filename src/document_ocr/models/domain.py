@@ -367,6 +367,22 @@ class StructuredExtractionResponse(BaseModel):
     raw_llm_response: Optional[str] = None  # Raw response from LLM before post-processing
     timers: Optional[Dict[str, float]] = None
     llm_model_used: Optional[str] = None
+
+
+# Schema generation models
+class SchemaGenerationRequest(BaseModel):
+    image_data: Optional[str] = None
+    full_text: Optional[str] = None
+    instruction: Optional[str] = None
+    llm_model: Optional[str] = None
+
+class SchemaGenerationResponse(BaseModel):
+    success: bool
+    schema: Optional[dict] = None
+    prompts_used: Optional[dict] = None
+    raw_llm_response: Optional[str] = None
+    error_message: Optional[str] = None
+    llm_model_used: Optional[str] = None
     
     class Config:
         json_schema_extra = {

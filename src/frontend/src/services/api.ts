@@ -1,5 +1,5 @@
 import type { OCRRequest, OCRResponse } from '@/types/api';
-import type { ExtractionResult, StructuredExtractionRequest } from '@/types/extraction';
+import type { ExtractionResult, StructuredExtractionRequest, SchemaGenerationResponse } from '@/types/extraction';
 
 const API_BASE_URL = 'http://localhost:8000';
 
@@ -197,5 +197,18 @@ export class ApiService {
       reader.onerror = () => reject(reader.error);
       reader.readAsDataURL(file);
     });
+  }
+
+  static async generateSchema(
+    imageDataOrFullText: { imageData?: string; fullText?: string },
+    instruction?: string,
+    llmModel?: 'gpt-40' | 'gpt-o4-mini' | 'gpt-5-mini' | 'gpt-5-nano'
+  ): Promise<SchemaGenerationResponse> {
+    const response = await fetch(`${API_BASE_URL}/schema/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_data: imageDataOrFullText.imageData, full_text: imageDataOrFullText.fullText, instruction, llm_model: llmModel }),
+    });
+    return this.handleResponse<SchemaGenerationResponse>(response);
   }
 }

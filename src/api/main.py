@@ -9,7 +9,8 @@ from fastapi.responses import JSONResponse
 
 from document_ocr.models.domain import (
     OCRRequest, OCRResponse,
-    StructuredExtractionRequest, StructuredExtractionResponse
+    StructuredExtractionRequest, StructuredExtractionResponse,
+    SchemaGenerationRequest, SchemaGenerationResponse
 )
 from document_ocr.services.document_processor import DocumentOCRProcessor
 from document_ocr.services.azure_openai_service import AzureOpenAIService
@@ -819,6 +820,48 @@ async def validate_schema(schema: dict):
             "message": "Schema validation error",
             "errors": [str(e)]
         }
+
+
+@app.post("/schema/generate", response_model=SchemaGenerationResponse)
+async def generate_schema(request: SchemaGenerationRequest):
+    """Generate a draft JSON schema from the document using OCR + LLM."""
+    if not structured_extractor:
+        raise HTTPException(status_code=503, detail="Azure OpenAI service not configured. Please set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT")
+
+    try:
+        image_data = None
+        if request.image_data:
+            try:
+                image_data = base64.b64decode(request.image_data)
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid base64 image data")
+
+        # Reuse OCR if full_text provided; else run OCR one time
+        if request.full_text:
+            full_text = request.full_text
+        else:
+            if image_data is None:
+                raise HTTPException(status_code=400, detail="Either full_text or image_data must be provided")
+            ocr = await processor.process_document(image_data)
+            full_text = ocr.full_text
+
+        # Choose provider/model
+        requested_model = (request.llm_model or default_llm_model).strip().lower()
+        provider = llm_providers.get(requested_model) or llm_providers.get(default_llm_model)
+        if provider is None:
+            raise HTTPException(status_code=503, detail="No LLM providers are configured on the server")
+
+        result = await provider.generate_json_schema(image_data=image_data, full_text=full_text, instruction=request.instruction)
+
+        return SchemaGenerationResponse(
+            success=True,
+            schema=result.get("schema"),
+            prompts_used=result.get("prompts_used"),
+            raw_llm_response=result.get("raw_llm_response"),
+            llm_model_used=result.get("llm_model_used"),
+        )
+    except Exception as e:
+        return SchemaGenerationResponse(success=False, schema=None, prompts_used=None, raw_llm_response=None, error_message=str(e))
 
 
 if __name__ == "__main__":
