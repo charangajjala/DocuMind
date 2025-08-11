@@ -1,6 +1,7 @@
 """Structured data extraction service with visual grounding."""
 
 import base64
+import copy
 import logging
 import time
 from typing import Dict, Any, Optional, List
@@ -98,7 +99,9 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
         json_schema: Optional[Dict[str, Any]] = None,
         user_prompt: Optional[str] = None,
         document_type: Optional[str] = None,
-        llm_provider_override: Optional[LLMProvider] = None
+        llm_provider_override: Optional[LLMProvider] = None,
+        allowed_element_types: Optional[List[str]] = None,
+        precomputed_ocr: Optional[DocumentOCRResult] = None,
     ) -> StructuredExtractionResult:
         """Extract structured data with visual grounding.
         
@@ -116,6 +119,11 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
             StructuredExtractionError: If extraction fails
         """
         start_time = time.time()
+        t_ocr_start: float | None = None
+        t_ocr_end: float | None = None
+        t_llm_start: float | None = None
+        t_llm_end: float | None = None
+        t_post_start: float | None = None
         errors = []
         
         try:
@@ -133,11 +141,18 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
                 logger.info("No JSON schema provided, using user prompt only")
             
             # Step 2: Process document with OCR
-            logger.info("Processing document with OCR")
-            ocr_results = await self.document_processor.process_document(
-                image_data, 
-                mime_type=mime_type
-            )
+            if precomputed_ocr is not None:
+                logger.info("Using cached OCR results")
+                ocr_results = precomputed_ocr
+                t_ocr_start = t_ocr_end = None
+            else:
+                logger.info("Processing document with OCR")
+                t_ocr_start = time.time()
+                ocr_results = await self.document_processor.process_document(
+                    image_data, 
+                    mime_type=mime_type
+                )
+                t_ocr_end = time.time()
             
             # Ensure text_blocks is not None - initialize as empty list if needed
             if not ocr_results.text_blocks:
@@ -145,11 +160,36 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
                 logger.warning("No text blocks found in OCR results")
                 ocr_results.text_blocks = []  # Initialize as empty list to prevent None errors
             
-            # Step 3: Build a safe subset for LLM input (non-destructive)
-            subset_ocr = self.selector.select_subset(ocr_results, json_schema)
+            # Step 3: Optionally filter by allowed element types before building safe subset
+            filtered_ocr = ocr_results
+            try:
+                if allowed_element_types:
+                    allowed = {str(t).lower() for t in allowed_element_types}
+                    filtered_blocks: List = []
+                    for idx, b in enumerate(ocr_results.text_blocks or []):
+                        if str(getattr(b, 'element_type', 'block')).lower() in allowed:
+                            copied = copy.deepcopy(b)
+                            # Preserve stable reference to original index so LLM block_id matches original OCR list
+                            setattr(copied, 'original_index', idx)
+                            filtered_blocks.append(copied)
+                    filtered_ocr = DocumentOCRResult(
+                        full_text=ocr_results.full_text,
+                        text_blocks=filtered_blocks,
+                        image_width=ocr_results.image_width,
+                        image_height=ocr_results.image_height,
+                        processing_time=ocr_results.processing_time,
+                        image_quality=ocr_results.image_quality,
+                        original_image_info=ocr_results.original_image_info,
+                    )
+            except Exception:
+                filtered_ocr = ocr_results
+
+            # Use filtered OCR directly (no additional optimization/subsetting in AI mode)
+            subset_ocr = filtered_ocr
 
             # Step 4: Extract structured data using LLM (with subset)
             logger.info("Extracting structured data with LLM")
+            t_llm_start = time.time()
             provider = llm_provider_override or self.llm_provider
             llm_response = await provider.extract_structured_data(
                 image_data=image_data,
@@ -158,9 +198,11 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
                 user_prompt=user_prompt,
                 document_type=document_type  # Pass document type to LLM
             )
+            t_llm_end = time.time()
             
             # Step 5: Process field mappings and create grounded fields using ORIGINAL OCR
             logger.info("Processing field mappings and visual grounding")
+            t_post_start = time.time()
             grounded_fields = self._process_field_mappings(
                 llm_response, ocr_results  # Use original OCR for bounding boxes
             )
@@ -183,6 +225,7 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
             llm_confidence = sum(field_confidences) / len(field_confidences) if field_confidences else 0.0
             prompts_used = llm_response.get("prompts_used", {})
             raw_llm_response = llm_response.get("raw_llm_response", None)
+            llm_model_used = llm_response.get("llm_model_used")
             
             logger.info(f"Structured extraction completed in {processing_time:.2f}s")
             
@@ -196,7 +239,14 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
                 schema_validation_passed=schema_validation_passed,
                 prompts_used=prompts_used,
                 errors=errors,
-                raw_llm_response=raw_llm_response
+                raw_llm_response=raw_llm_response,
+                timers={
+                    "ocr_ms": ((t_ocr_end or 0) - (t_ocr_start or 0)) * 1000,
+                    "llm_ms": ((t_llm_end or 0) - (t_llm_start or 0)) * 1000,
+                    "post_ms": ((time.time()) - (t_post_start or time.time())) * 1000,
+                    "total_ms": processing_time * 1000,
+                },
+                llm_model_used=llm_model_used
             )
             
         except Exception as e:

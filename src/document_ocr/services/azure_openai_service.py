@@ -14,7 +14,11 @@ from ..models.domain import DocumentOCRResult, TextBlock
 from ..prompts.system_prompts import get_extraction_system_prompt, get_enhanced_system_prompt
 from ..prompts.user_prompts import get_base_extraction_prompt
 from ..prompts.document_type_prompts import get_schema_specific_prompt
-from ..prompts.text_only_prompts import get_text_only_user_override
+from ..prompts.text_only_prompts import (
+    get_text_only_user_override,
+    get_text_only_system_prompt,
+    get_text_only_user_prompt,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -217,6 +221,7 @@ class AzureOpenAIService(LLMProvider):
                 "subset_block_count": len(ocr_results.text_blocks or []),
             }
             llm_full_response["raw_llm_response"] = raw_llm_response
+            llm_full_response["llm_model_used"] = self.deployment
             
             logger.info(f"Successfully extracted structured data using Azure OpenAI")
             return llm_full_response
@@ -234,7 +239,8 @@ class AzureOpenAIService(LLMProvider):
         full_text: str,
         json_schema: Optional[Dict[str, Any]] = None,
         user_prompt: Optional[str] = None,
-        document_type: Optional[str] = None
+        document_type: Optional[str] = None,
+        image_data: Optional[bytes] = None,
     ) -> Dict[str, Any]:
         """Extract structured data using text-only (no image, no OCR blocks/bboxes).
 
@@ -243,28 +249,30 @@ class AzureOpenAIService(LLMProvider):
         """
         try:
             # Build a lean system prompt that includes only full OCR text and (optional) schema
-            schema_section = json.dumps(json_schema, indent=2) if json_schema else None
-            system_prompt_parts = [
-                "You are a precise information extraction assistant.",
-                "You will ONLY receive raw OCR text (no images or bounding boxes).",
-                "Extract structured data according to the user's schema/instructions and return JSON matching the RESPONSE FORMAT SCHEMA provided in the user prompt.",
-                f"OCR Full Text (verbatim):\n{full_text[:120000]}"  # hard cap to avoid excessively long prompts
-            ]
-            if document_type:
-                system_prompt_parts.insert(1, f"Document Type: {document_type}")
-            if schema_section:
-                system_prompt_parts.append(f"Data Extraction Schema (what to extract):\n{schema_section}")
-            system_prompt = "\n\n".join(system_prompt_parts)
+            # Clean manual-mode prompts (no field-mapping/block rules)
+            system_prompt = get_text_only_system_prompt(json_schema, full_text, document_type)
+            final_user_prompt = get_text_only_user_prompt(user_prompt)
 
-            # Create user prompt that embeds the response schema and rules (reuse the same base prompt generator)
-            final_user_prompt = self._create_user_prompt(user_prompt, json_schema)
-            # TEXT-ONLY OVERRIDE: appended via dedicated helper for modularity
-            final_user_prompt = f"{final_user_prompt}\n{get_text_only_user_override(document_type)}"
-
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": final_user_prompt},
-            ]
+            messages = [{"role": "system", "content": system_prompt}]
+            if image_data is not None:
+                image_b64 = base64.b64encode(image_data).decode('utf-8')
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": final_user_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{image_b64}",
+                                    "detail": "high",
+                                },
+                            },
+                        ],
+                    }
+                )
+            else:
+                messages.append({"role": "user", "content": final_user_prompt})
 
             # Token estimates (rough)
             def _approx(text: str) -> int:

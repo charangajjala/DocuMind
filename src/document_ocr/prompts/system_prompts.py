@@ -40,6 +40,12 @@ AVAILABLE RESOURCES:
 • OCR Text Blocks (with positions and hierarchy):
 {json.dumps(ocr_text_blocks, indent=2)}
 
+FULL TEXT PRIORITY (CRITICAL):
+• Treat the OCR Full Text as the primary and complete textual source for extracting field values.
+• The OCR Text Blocks list may be a filtered subset (e.g., by element type) provided for visual grounding convenience.
+• If information appears in OCR Full Text but not in the provided OCR Text Blocks, you must still extract it from the Full Text.
+• Use OCR Text Blocks primarily to choose precise bounding boxes and source_block_id(s) for grounding; do not limit extraction to only what appears in the blocks.
+
 VISUAL INTELLIGENCE (MANDATORY):
 • Do NOT blindly rely on OCR text. Use visual layout, structure, and content (tables, columns, headers, badges, icons, alignment) to guide extraction.
 • Reconcile discrepancies by considering labels, column headers, grouping, typography, and spatial proximity. Explain decisions in reasoning.

@@ -169,6 +169,7 @@ class StructuredExtractionRequest(BaseModel):
     document_type: Optional[str] = None  # Document type hint for specialized prompts
     confidence_threshold: float = 0.8
     llm_model: Optional[str] = None  # e.g., 'gpt-40', 'gpt-o4-mini', 'gpt-5-mini', 'gpt-5-nano'
+    allowed_element_types: Optional[list[str]] = None  # Limit OCR blocks passed to LLM context
     
     @model_validator(mode='after')
     def validate_schema_or_prompt(self):
@@ -339,6 +340,8 @@ class StructuredExtractionResult:
     prompts_used: Dict[str, str]
     errors: List[str]
     raw_llm_response: Optional[str] = None  # Raw response from LLM before post-processing
+    timers: Optional[Dict[str, float]] = None
+    llm_model_used: Optional[str] = None
     
     def get_field_by_name(self, field_name: str) -> Optional[GroundedDataField]:
         """Get grounded field by name."""
@@ -362,6 +365,8 @@ class StructuredExtractionResponse(BaseModel):
     errors: List[str]
     error_message: Optional[str] = None
     raw_llm_response: Optional[str] = None  # Raw response from LLM before post-processing
+    timers: Optional[Dict[str, float]] = None
+    llm_model_used: Optional[str] = None
     
     class Config:
         json_schema_extra = {

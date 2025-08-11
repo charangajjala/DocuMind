@@ -2,11 +2,10 @@ import { useState, useCallback, useEffect } from 'react';
 import { FileUpload } from '@/components/FileUpload';
 import { ModeToggle } from '@/components/mode-toggle';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
-import { Label as UILabel } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+// Removed unused UILabel import
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Textarea } from '@/components/ui/textarea';
@@ -18,6 +17,7 @@ import { ExtractedFieldsDisplay } from '@/components/ExtractedFieldsDisplay';
 import { OCRVisualization } from '@/components/OCRVisualization';
 import { EnhancedSchemaBuilder } from '@/components/EnhancedSchemaBuilder';
 import type { OCRResponse } from '@/types/api';
+import type { ExtractionResult } from '@/types/extraction';
 import { 
   Loader2, 
   FileText, 
@@ -47,20 +47,38 @@ export function ImprovedOCRApp() {
   const [hoveredField, setHoveredField] = useState<string | null>(null);
   const [hoveredTextBlock, setHoveredTextBlock] = useState<number | null>(null);
   const [userPrompt, setUserPrompt] = useState<string>('');
-  const [fullPromptsUsed, setFullPromptsUsed] = useState<{
+  interface PromptEstimates { 
+    system_prompt_tokens: number; 
+    user_prompt_tokens: number; 
+    image_input_tokens: number; 
+    total_estimated_input_tokens: number; 
+  }
+  interface StagePrompts { 
+    system_prompt?: string; 
+    user_prompt?: string; 
+    token_estimates?: PromptEstimates; 
+  }
+  type PromptsUsed = {
     system_prompt?: string;
     user_prompt?: string;
-    token_estimates?: {
-      system_prompt_tokens: number;
-      user_prompt_tokens: number;
-      image_input_tokens: number;
-      total_estimated_input_tokens: number;
-    };
+    token_estimates?: PromptEstimates;
     subset_block_count?: number;
-  } | null>(null);
+    mode?: string;
+    stage1?: StagePrompts & { token_estimates?: PromptEstimates };
+    stage2?: StagePrompts & { token_estimates?: PromptEstimates; filtered_block_count?: number };
+  };
+  const [fullPromptsUsed, setFullPromptsUsed] = useState<PromptsUsed | null>(null);
   const [rawLlmResponse, setRawLlmResponse] = useState<string | null>(null);
   const [llmModel, setLlmModel] = useState<'gpt-40' | 'gpt-o4-mini' | 'gpt-5-mini' | 'gpt-5-nano'>('gpt-5-mini');
-  const [useManualGrounding, setUseManualGrounding] = useState<boolean>(false);
+  type GroundingMode = 'ai' | 'manual' | 'hybrid';
+  const [groundingMode, setGroundingMode] = useState<GroundingMode>('ai');
+  const AVAILABLE_TYPES: Array<'block' | 'paragraph' | 'line' | 'token'> = ['block','paragraph','line','token'];
+  const [allowedElementTypes, setAllowedElementTypes] = useState<Array<'block' | 'paragraph' | 'line' | 'token'>>(['line']);
+  const toggleAllowedType = (t: 'block' | 'paragraph' | 'line' | 'token') => {
+    setAllowedElementTypes(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
+  };
+  const selectAllTypes = () => setAllowedElementTypes(AVAILABLE_TYPES);
+  const clearAllTypes = () => setAllowedElementTypes([]);
 
   // Computed states
   const hasOCRResults = ocrResults !== null;
@@ -159,9 +177,14 @@ export function ImprovedOCRApp() {
         timestamp: new Date().toISOString()
       });
       
-      const response = useManualGrounding
-        ? await ApiService.extractStructuredDataOCROnly(base64Data, jsonSchema, prompt, llmModel)
-        : await ApiService.extractStructuredData(base64Data, jsonSchema, prompt, llmModel);
+      let response: ExtractionResult;
+      if (groundingMode === 'manual') {
+        response = await ApiService.extractStructuredDataOCROnly(base64Data, jsonSchema, prompt, llmModel);
+      } else if (groundingMode === 'hybrid') {
+        response = await ApiService.extractStructuredDataHybrid(base64Data, jsonSchema, prompt, llmModel);
+      } else {
+        response = await ApiService.extractStructuredData(base64Data, jsonSchema, prompt, llmModel, allowedElementTypes);
+      }
       
       console.log('✅ Structured Extraction Response from backend:', response);
       
@@ -295,8 +318,17 @@ export function ImprovedOCRApp() {
                     </SelectContent>
                   </Select>
                   <div className="flex items-center gap-2">
-                    <UILabel htmlFor="grounding-switch" className="text-xs text-muted-foreground">Manual Grounding</UILabel>
-                    <Switch id="grounding-switch" checked={useManualGrounding} onCheckedChange={setUseManualGrounding} />
+                    <span className="text-xs text-muted-foreground">Mode</span>
+                    <Select value={groundingMode} onValueChange={(v) => setGroundingMode(v as GroundingMode)}>
+                      <SelectTrigger className="h-8 w-40">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ai">AI-powered</SelectItem>
+                        <SelectItem value="manual">Manual</SelectItem>
+                        <SelectItem value="hybrid">Hybrid</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
                 <ModeToggle />
@@ -356,7 +388,7 @@ export function ImprovedOCRApp() {
             {/* Upload Tab */}
             <TabsContent value="upload" className="space-y-6">
               <div className="max-w-6xl mx-auto">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+               <div className="space-y-6">
                   {/* Upload Section */}
                   <Card className="border-0 shadow-lg">
                     <CardHeader>
@@ -480,6 +512,33 @@ export function ImprovedOCRApp() {
                   initialSchema={schema || undefined}
                   onSchemaChange={setSchema}
                 />
+                {groundingMode === 'ai' && (
+                  <Card className="border shadow-sm">
+                    <CardHeader>
+                      <CardTitle className="text-lg">OCR Element Types for LLM Context</CardTitle>
+                      <CardDescription>
+                        Choose which OCR text element types to include when sending context to the AI model. Default is line.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="text-sm text-muted-foreground">Applies in AI grounding mode only</div>
+                        <div className="flex items-center gap-2">
+                          <Button size="sm" variant="outline" onClick={selectAllTypes} disabled={allowedElementTypes.length === AVAILABLE_TYPES.length}>All</Button>
+                          <Button size="sm" variant="outline" onClick={clearAllTypes} disabled={allowedElementTypes.length === 0}>None</Button>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-4">
+                        {AVAILABLE_TYPES.map(t => (
+                          <label key={t} className="flex items-center gap-2 text-sm">
+                            <input type="checkbox" checked={allowedElementTypes.includes(t)} onChange={() => toggleAllowedType(t)} />
+                            <span className="capitalize">{t}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
                 
                 {/* Extraction Controls */}
                 {((schema && schema.properties && Object.keys(schema.properties).length > 0) || userPrompt.trim().length > 0) && (
@@ -608,7 +667,7 @@ export function ImprovedOCRApp() {
 
             {/* LLM Debug Tab */}
             <TabsContent value="prompts" className="space-y-4">
-              {fullPromptsUsed && (
+            {fullPromptsUsed && (
                 <div className="w-full max-w-6xl mx-auto space-y-6">
                   <div className="text-center mb-6">
                     <h2 className="text-2xl font-bold mb-2 flex items-center justify-center gap-2">
@@ -620,46 +679,96 @@ export function ImprovedOCRApp() {
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* System Prompt */}
-                    {fullPromptsUsed.system_prompt && (
-                      <Card className="border shadow-lg h-fit">
-                        <CardHeader className="pb-4">
-                          <CardTitle className="text-xl flex items-center gap-2">
-                            <Settings className="h-6 w-6 text-blue-600" />
-                            System Prompt
-                          </CardTitle>
-                          <CardDescription>
-                            The complete system instructions including schema definition, OCR data, and extraction rules
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-4 border-l-4 border-blue-500">
-                            <div className="max-h-96 overflow-y-auto">
-                              <pre className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
-                                {fullPromptsUsed.system_prompt}
-                              </pre>
+                  <div className="space-y-6">
+                  {/* System Prompt(s) */}
+                  {/* Stage prompts as tabs for cleaner layout */}
+                  {(fullPromptsUsed.system_prompt || fullPromptsUsed.stage1 || fullPromptsUsed.stage2) && (
+                    <Card className="border shadow-lg">
+                       <CardHeader className="pb-2">
+                        <CardTitle className="text-xl flex items-center gap-2">
+                          <Settings className="h-6 w-6 text-blue-600" />
+                          Prompts {fullPromptsUsed.mode ? `(${String(fullPromptsUsed.mode)})` : ''}
+                        </CardTitle>
+                        <CardDescription>
+                          Complete prompts used at each stage
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="pt-0">
+                        <Tabs defaultValue={fullPromptsUsed.stage1 ? 'stage1' : 'primary'}>
+                          <TabsList className="mb-3 flex flex-wrap gap-2">
+                            {fullPromptsUsed.stage1 && <TabsTrigger value="stage1">Stage 1</TabsTrigger>}
+                            <TabsTrigger value="primary">{fullPromptsUsed.stage2 ? 'Stage 2' : 'Primary'}</TabsTrigger>
+                          </TabsList>
+                          {fullPromptsUsed.stage1 && (
+                            <TabsContent value="stage1">
+                               <div className="space-y-4">
+                                {fullPromptsUsed.stage1.system_prompt && (
+                                  <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-4 border border-slate-200 dark:border-slate-800">
+                                    <div className="text-xs font-semibold mb-2">System Prompt</div>
+                                    <div className="max-h-96 overflow-y-auto custom-scroll">
+                                      <pre className="text-xs whitespace-pre-wrap font-mono leading-relaxed">
+                                        {fullPromptsUsed.stage1.system_prompt}
+                                      </pre>
+                                    </div>
+                                  </div>
+                                )}
+                                {fullPromptsUsed.stage1.user_prompt && (
+                                  <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-4 border border-slate-200 dark:border-slate-800">
+                                    <div className="text-xs font-semibold mb-2">User Prompt</div>
+                                    <div className="max-h-96 overflow-y-auto custom-scroll">
+                                      <pre className="text-xs whitespace-pre-wrap font-mono leading-relaxed">
+                                        {fullPromptsUsed.stage1.user_prompt}
+                                      </pre>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </TabsContent>
+                          )}
+                          <TabsContent value="primary">
+                             <div className="space-y-4">
+                              {fullPromptsUsed.system_prompt && (
+                                <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-4 border border-slate-200 dark:border-slate-800">
+                                  <div className="text-xs font-semibold mb-2">System Prompt</div>
+                                  <div className="max-h-96 overflow-y-auto custom-scroll">
+                                    <pre className="text-xs whitespace-pre-wrap font-mono leading-relaxed">
+                                      {fullPromptsUsed.system_prompt}
+                                    </pre>
+                                  </div>
+                                </div>
+                              )}
+                              {fullPromptsUsed.user_prompt && (
+                                <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-4 border border-slate-200 dark:border-slate-800">
+                                  <div className="text-xs font-semibold mb-2">User Prompt</div>
+                                  <div className="max-h-96 overflow-y-auto custom-scroll">
+                                    <pre className="text-xs whitespace-pre-wrap font-mono leading-relaxed">
+                                      {fullPromptsUsed.user_prompt}
+                                    </pre>
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )}
+                          </TabsContent>
+                        </Tabs>
+                      </CardContent>
+                    </Card>
+                  )}
 
-                    {/* User Prompt */}
-                    {fullPromptsUsed.user_prompt && (
+                  {/* User Prompt(s): render only when hybrid stages are present to avoid duplicate with Primary */}
+                  {fullPromptsUsed.user_prompt && (fullPromptsUsed.stage1 || fullPromptsUsed.stage2) && (
                       <Card className="border shadow-lg h-fit">
-                        <CardHeader className="pb-4">
+                           <CardHeader className="pb-2">
                           <CardTitle className="text-xl flex items-center gap-2">
                             <Brain className="h-6 w-6 text-purple-600" />
-                            User Prompt
+                          User Prompt {fullPromptsUsed.mode ? `(${String(fullPromptsUsed.mode)})` : ''}
                           </CardTitle>
                           <CardDescription>
                             The final user instructions sent to the AI model with extraction guidance and response format
                           </CardDescription>
                         </CardHeader>
-                        <CardContent>
-                          <div className="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-4 border-l-4 border-purple-500">
-                            <div className="max-h-96 overflow-y-auto">
+                      <CardContent className="pt-0">
+                        <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-4 border border-slate-200 dark:border-slate-800">
+                          <div className="max-h-96 overflow-y-auto custom-scroll">
                               <pre className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
                                 {fullPromptsUsed.user_prompt}
                               </pre>
@@ -668,15 +777,101 @@ export function ImprovedOCRApp() {
                         </CardContent>
                       </Card>
                     )}
+                  {/* Hybrid Stage 2 prompts (if present) */}
+                  {fullPromptsUsed.stage2 && (
+                    <div className="space-y-6">
+                      {fullPromptsUsed.stage2.system_prompt && (
+                        <Card className="border shadow-lg h-fit">
+                          <CardHeader className="pb-4">
+                            <CardTitle className="text-xl flex items-center gap-2">
+                              <Settings className="h-6 w-6 text-blue-600" />
+                              Stage 2 System Prompt
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="pt-0">
+                            <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-4 border border-slate-200 dark:border-slate-800">
+                              <div className="max-h-96 overflow-y-auto custom-scroll">
+                                <pre className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
+                                  {fullPromptsUsed.stage2.system_prompt}
+                                </pre>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )}
+                      {fullPromptsUsed.stage2.user_prompt && (
+                        <Card className="border shadow-lg h-fit">
+                          <CardHeader className="pb-4">
+                            <CardTitle className="text-xl flex items-center gap-2">
+                              <Brain className="h-6 w-6 text-purple-600" />
+                              Stage 2 User Prompt
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="pt-0">
+                            <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-4 border border-slate-200 dark:border-slate-800">
+                              <div className="max-h-96 overflow-y-auto custom-scroll">
+                                <pre className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
+                                  {fullPromptsUsed.stage2.user_prompt}
+                                </pre>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )}
+                    </div>
+                  )}
+                  {/* Hybrid Stage 1 prompts (if present and top-level not provided) */}
+                  {fullPromptsUsed.stage1 && (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      {fullPromptsUsed.stage1.system_prompt && (
+                        <Card className="border shadow-lg h-fit">
+                          <CardHeader className="pb-4">
+                            <CardTitle className="text-xl flex items-center gap-2">
+                              <Settings className="h-6 w-6 text-blue-600" />
+                              Stage 1 System Prompt
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            <div className="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-4 border-l-4 border-blue-500">
+                              <div className="max-h-96 overflow-y-auto">
+                                <pre className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
+                                  {fullPromptsUsed.stage1.system_prompt}
+                                </pre>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )}
+                      {fullPromptsUsed.stage1.user_prompt && (
+                        <Card className="border shadow-lg h-fit">
+                          <CardHeader className="pb-4">
+                            <CardTitle className="text-xl flex items-center gap-2">
+                              <Brain className="h-6 w-6 text-purple-600" />
+                              Stage 1 User Prompt
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            <div className="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-4 border-l-4 border-purple-500">
+                              <div className="max-h-96 overflow-y-auto">
+                                <pre className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
+                                  {fullPromptsUsed.stage1.user_prompt}
+                                </pre>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )}
+                    </div>
+                  )}
                   </div>
 
-                  {/* Raw LLM Response */}
+                  {/* Raw LLM Responses (all stages if available) */}
                   {rawLlmResponse && (
-                    <Card className="border shadow-lg mt-6">
+                    <Card className="border shadow-lg mt-2">
                       <CardHeader className="pb-4">
                         <CardTitle className="text-xl flex items-center gap-2">
                           <MessageSquare className="h-6 w-6 text-green-600" />
-                          Raw LLM Response
+                          Raw LLM Response {fullPromptsUsed?.mode ? `(${String(fullPromptsUsed.mode)})` : ''}
                           <Button
                             variant="outline"
                             size="sm"
@@ -690,15 +885,55 @@ export function ImprovedOCRApp() {
                           The exact response received from the AI model before any post-processing by the backend
                         </CardDescription>
                       </CardHeader>
-                      <CardContent>
-                        <div className="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-4 border-l-4 border-green-500">
-                          <div className="max-h-96 overflow-y-auto">
-                            <pre className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
-                              {rawLlmResponse}
-                            </pre>
-                          </div>
-                        </div>
-                      </CardContent>
+                       <CardContent className="pt-0">
+                         <div className="space-y-4">
+                           {/* If the backend provided a JSON with stage1/stage2 raw responses, render them split */}
+                           {(() => {
+                             try {
+                               const parsed = JSON.parse(rawLlmResponse);
+                               if (parsed?.stage1 || parsed?.stage2) {
+                                 return (
+                                   <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-4 border border-slate-200 dark:border-slate-800">
+                                     <Tabs defaultValue={parsed.stage1 ? 'stage1' : 'stage2'}>
+                                       <TabsList className="mb-3">
+                                         {parsed.stage1?.raw_llm_response && <TabsTrigger value="stage1">Stage 1</TabsTrigger>}
+                                         {parsed.stage2?.raw_llm_response && <TabsTrigger value="stage2">Stage 2</TabsTrigger>}
+                                       </TabsList>
+                                       {parsed.stage1?.raw_llm_response && (
+                                         <TabsContent value="stage1">
+                                           <div className="max-h-96 overflow-y-auto custom-scroll">
+                                             <pre className="text-xs whitespace-pre-wrap font-mono leading-relaxed">
+                                               {parsed.stage1.raw_llm_response}
+                                             </pre>
+                                           </div>
+                                         </TabsContent>
+                                       )}
+                                       {parsed.stage2?.raw_llm_response && (
+                                         <TabsContent value="stage2">
+                                           <div className="max-h-96 overflow-y-auto custom-scroll">
+                                             <pre className="text-xs whitespace-pre-wrap font-mono leading-relaxed">
+                                               {parsed.stage2.raw_llm_response}
+                                             </pre>
+                                           </div>
+                                         </TabsContent>
+                                       )}
+                                     </Tabs>
+                                   </div>
+                                 );
+                               }
+                             } catch {}
+                             return (
+                               <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-4 border border-slate-200 dark:border-slate-800">
+                                 <div className="max-h-96 overflow-y-auto custom-scroll">
+                                   <pre className="text-xs whitespace-pre-wrap font-mono leading-relaxed">
+                                     {rawLlmResponse}
+                                   </pre>
+                                 </div>
+                               </div>
+                             );
+                           })()}
+                         </div>
+                       </CardContent>
                     </Card>
                   )}
 
@@ -711,30 +946,39 @@ export function ImprovedOCRApp() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                         <div className="text-center p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                          <div className="text-2xl font-bold text-blue-600">
-                            {fullPromptsUsed.token_estimates?.system_prompt_tokens ?? Math.floor((fullPromptsUsed.system_prompt?.length || 0)/4)}
+                           <div className="text-2xl font-bold text-blue-600">
+                             {fullPromptsUsed.token_estimates?.system_prompt_tokens
+                              ?? fullPromptsUsed.stage1?.token_estimates?.system_prompt_tokens
+                              ?? Math.floor(((fullPromptsUsed.system_prompt || fullPromptsUsed.stage1?.system_prompt || '').length)/4)}
                           </div>
                           <div className="text-sm text-muted-foreground">System Prompt Tokens (est.)</div>
                         </div>
                         <div className="text-center p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
-                          <div className="text-2xl font-bold text-purple-600">
-                            {fullPromptsUsed.token_estimates?.user_prompt_tokens ?? Math.floor((fullPromptsUsed.user_prompt?.length || 0)/4)}
+                           <div className="text-2xl font-bold text-purple-600">
+                             {fullPromptsUsed.token_estimates?.user_prompt_tokens
+                              ?? fullPromptsUsed.stage1?.token_estimates?.user_prompt_tokens
+                              ?? Math.floor(((fullPromptsUsed.user_prompt || fullPromptsUsed.stage1?.user_prompt || '').length)/4)}
                           </div>
                           <div className="text-sm text-muted-foreground">User Prompt Tokens (est.)</div>
                         </div>
                         <div className="text-center p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
                           <div className="text-2xl font-bold text-green-600">
-                            {fullPromptsUsed.token_estimates?.image_input_tokens ?? 0}
+                             {fullPromptsUsed.token_estimates?.image_input_tokens
+                              ?? fullPromptsUsed.stage1?.token_estimates?.image_input_tokens
+                              ?? 0}
                           </div>
                           <div className="text-sm text-muted-foreground">Image Input Tokens (est.)</div>
                         </div>
                         <div className="text-center p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
                           <div className="text-2xl font-bold text-orange-600">
-                            {fullPromptsUsed.token_estimates?.total_estimated_input_tokens ?? (
-                              Math.floor((fullPromptsUsed.system_prompt?.length || 0)/4) + Math.floor((fullPromptsUsed.user_prompt?.length || 0)/4)
-                            )}
+                             {fullPromptsUsed.token_estimates?.total_estimated_input_tokens
+                              ?? fullPromptsUsed.stage1?.token_estimates?.total_estimated_input_tokens
+                              ?? (
+                                Math.floor(((fullPromptsUsed.system_prompt || fullPromptsUsed.stage1?.system_prompt || '').length)/4)
+                                + Math.floor(((fullPromptsUsed.user_prompt || fullPromptsUsed.stage1?.user_prompt || '').length)/4)
+                              )}
                           </div>
                           <div className="text-sm text-muted-foreground">Total Estimated Input Tokens</div>
                         </div>
@@ -765,7 +1009,28 @@ export function ImprovedOCRApp() {
                           </div>
                           <div className="text-sm text-muted-foreground">Block Reduction</div>
                         </div>
-                      </div>
+                       </div>
+                       {/* Mode-specific stats */}
+                       {fullPromptsUsed.mode && (
+                         <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                           <div className="text-center p-4 bg-slate-50 dark:bg-slate-900/20 rounded-lg">
+                             <div className="text-xs text-muted-foreground">Mode</div>
+                             <div className="text-base font-semibold">{String(fullPromptsUsed.mode)}</div>
+                           </div>
+                           {fullPromptsUsed.stage2?.filtered_block_count !== undefined && (
+                             <div className="text-center p-4 bg-slate-50 dark:bg-slate-900/20 rounded-lg">
+                               <div className="text-xs text-muted-foreground">Filtered Blocks</div>
+                               <div className="text-base font-semibold">{fullPromptsUsed.stage2.filtered_block_count}</div>
+                             </div>
+                           )}
+                           {structuredResults?.grounded_fields && (
+                             <div className="text-center p-4 bg-slate-50 dark:bg-slate-900/20 rounded-lg">
+                               <div className="text-xs text-muted-foreground">Fields Grounded</div>
+                               <div className="text-base font-semibold">{structuredResults.grounded_fields.length}</div>
+                             </div>
+                           )}
+                         </div>
+                       )}
                     </CardContent>
                   </Card>
                 </div>
