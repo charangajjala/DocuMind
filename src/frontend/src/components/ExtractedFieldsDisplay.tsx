@@ -9,10 +9,12 @@ import {
   Brain,
   Eye,
   Copy,
+  Download,
   ChevronDown,
   ChevronRight
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useState } from 'react';
 import type { JSX } from 'react';
@@ -311,6 +313,31 @@ export function ExtractedFieldsDisplay({
     copyToClipboard(formattedData);
   };
 
+  const downloadExtractedJSON = () => {
+    try {
+      const blob = new Blob([JSON.stringify(extracted_data ?? {}, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `extracted-data-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Failed to download extracted JSON:', e);
+    }
+  };
+
+  const copyRawJSON = () => {
+    try {
+      const raw = JSON.stringify(extracted_data ?? {}, null, 2);
+      navigator.clipboard.writeText(raw);
+    } catch (e) {
+      console.error('Failed to copy raw JSON:', e);
+    }
+  };
+
   // Reasoning toggles removed in compact mode
 
   // Recursively render values and attach group-aware hover to each path
@@ -397,7 +424,12 @@ export function ExtractedFieldsDisplay({
                   <p className="text-sm font-semibold text-blue-600">
                     {processing_time?.toFixed(1)}s
                   </p>
-                  {(structuredResults.timers || structuredResults.llm_model_used) && (
+                  {(() => {
+                    const imageMeta = structuredResults?.prompts_used?.image_metadata
+                      || structuredResults?.prompts_used?.stage1?.image_metadata
+                      || structuredResults?.prompts_used?.stage2?.image_metadata;
+                    return (structuredResults.timers || structuredResults.llm_model_used || imageMeta);
+                  })() && (
                     <div className="mt-1 grid grid-cols-3 gap-1 text-[10px] text-muted-foreground">
                       {structuredResults.timers && <div>OCR {(structuredResults.timers.ocr_ms/1000).toFixed(2)}s</div>}
                       {structuredResults.timers && <div>LLM {(structuredResults.timers.llm_ms/1000).toFixed(2)}s</div>}
@@ -405,6 +437,19 @@ export function ExtractedFieldsDisplay({
                       {structuredResults.llm_model_used && (
                         <div className="col-span-3 text-[10px]">Model: {structuredResults.llm_model_used}</div>
                       )}
+                      {(() => {
+                        const imageMeta = structuredResults?.prompts_used?.image_metadata
+                          || structuredResults?.prompts_used?.stage1?.image_metadata
+                          || structuredResults?.prompts_used?.stage2?.image_metadata;
+                        return imageMeta ? (
+                        <div className="col-span-3 text-[10px]">
+                          Img: {imageMeta.width}×{imageMeta.height}
+                          {typeof imageMeta.size_bytes === 'number' && (
+                            <> · {(imageMeta.size_bytes / 1024).toFixed(1)} KB</>
+                          )}
+                        </div>
+                        ) : null;
+                      })()}
                     </div>
                   )}
                 </div>
@@ -471,17 +516,61 @@ export function ExtractedFieldsDisplay({
                     <p>Copy all extracted data to clipboard</p>
                   </TooltipContent>
                 </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={downloadExtractedJSON}
+                      className="h-8"
+                    >
+                      <Download className="h-4 w-4 mr-1" />
+                      Download JSON
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Download raw extracted_data as JSON</p>
+                  </TooltipContent>
+                </Tooltip>
               </div>
             </div>
           </CardHeader>
           <CardContent>
-            <ScrollArea className="h-[420px] pr-2">
-              <div className="space-y-1">
-                {Object.entries(extracted_data || {}).map(([key, val]) => (
-                  <div key={key}>{renderTree(key, val, 0)}</div>
-                ))}
-              </div>
-            </ScrollArea>
+            <Tabs defaultValue="formatted" className="w-full">
+              <TabsList className="mb-2">
+                <TabsTrigger value="formatted">Formatted</TabsTrigger>
+                <TabsTrigger value="raw">Raw JSON</TabsTrigger>
+              </TabsList>
+              <TabsContent value="formatted">
+                <ScrollArea className="h-[420px] pr-2">
+                  <div className="space-y-1">
+                    {Object.entries(extracted_data || {}).map(([key, val]) => (
+                      <div key={key}>{renderTree(key, val, 0)}</div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </TabsContent>
+              <TabsContent value="raw">
+                <div className="flex items-center justify-end mb-2">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="outline" size="sm" onClick={copyRawJSON} className="h-8">
+                        <Copy className="h-4 w-4 mr-1" />
+                        Copy JSON
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Copy raw JSON to clipboard</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <div className="bg-muted rounded-md p-3">
+                  <pre className="text-xs whitespace-pre-wrap break-words max-h-[420px] overflow-auto">
+                    {JSON.stringify(extracted_data ?? {}, null, 2)}
+                  </pre>
+                </div>
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
 

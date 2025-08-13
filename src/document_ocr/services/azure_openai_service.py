@@ -1,12 +1,14 @@
 """Azure OpenAI service for structured data extraction."""
 
 import base64
+import io
 import json
 import logging
 from typing import Dict, Any, Optional
 import asyncio
 
 from openai import AsyncAzureOpenAI
+from PIL import Image
 
 from ..core.interfaces import LLMProvider
 from ..core.exceptions import DocumentOCRError
@@ -144,6 +146,17 @@ class AzureOpenAIService(LLMProvider):
             
             # Encode image to base64
             image_b64 = base64.b64encode(image_data).decode('utf-8')
+
+            # Gather basic image metadata as actually sent to the LLM
+            img_width: Optional[int] = None
+            img_height: Optional[int] = None
+            img_format: Optional[str] = None
+            try:
+                with Image.open(io.BytesIO(image_data)) as _img:
+                    img_width, img_height = _img.size
+                    img_format = _img.format
+            except Exception:
+                pass
             
             # Create messages for the API
             messages = [
@@ -186,12 +199,15 @@ class AzureOpenAIService(LLMProvider):
                 image_tokens = 100
             total_estimated_input_tokens = system_tokens + user_tokens + image_tokens
 
-            # Make API call
+            # Make API call (measure API latency precisely)
+            import time as _time
+            _api_start = _time.time()
             response = await self.client.chat.completions.create(
                 model=self.deployment,
                 messages=messages,
                 response_format={"type": "json_object"}
             )
+            _api_end = _time.time()
             
             # Capture the raw LLM response before any processing
             raw_llm_response = response.choices[0].message.content
@@ -223,9 +239,18 @@ class AzureOpenAIService(LLMProvider):
                     "total_estimated_input_tokens": total_estimated_input_tokens,
                 },
                 "subset_block_count": len(ocr_results.text_blocks or []),
+                "image_metadata": {
+                    "width": img_width if img_width is not None else getattr(ocr_results, "image_width", None),
+                    "height": img_height if img_height is not None else getattr(ocr_results, "image_height", None),
+                    "size_bytes": len(image_data),
+                    "format": img_format,
+                },
             }
             llm_full_response["raw_llm_response"] = raw_llm_response
             llm_full_response["llm_model_used"] = self.deployment
+            llm_full_response["timers"] = {
+                "api_ms": int((_api_end - _api_start) * 1000)
+            }
             
             logger.info(f"Successfully extracted structured data using Azure OpenAI")
             return llm_full_response
@@ -260,6 +285,16 @@ class AzureOpenAIService(LLMProvider):
             messages = [{"role": "system", "content": system_prompt}]
             if image_data is not None:
                 image_b64 = base64.b64encode(image_data).decode('utf-8')
+                # Collect image metadata for UI/debug
+                img_width: Optional[int] = None
+                img_height: Optional[int] = None
+                img_format: Optional[str] = None
+                try:
+                    with Image.open(io.BytesIO(image_data)) as _img:
+                        img_width, img_height = _img.size
+                        img_format = _img.format
+                except Exception:
+                    pass
                 messages.append(
                     {
                         "role": "user",
@@ -311,6 +346,14 @@ class AzureOpenAIService(LLMProvider):
                     "total_estimated_input_tokens": system_tokens + user_tokens,
                 },
                 "subset_block_count": 0,
+                **({
+                    "image_metadata": {
+                        "width": img_width,
+                        "height": img_height,
+                        "size_bytes": len(image_data) if image_data is not None else None,
+                        "format": img_format,
+                    }
+                } if image_data is not None else {}),
             }
             llm_full_response["raw_llm_response"] = raw_llm_response
             return llm_full_response

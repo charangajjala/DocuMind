@@ -226,6 +226,11 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
             prompts_used = llm_response.get("prompts_used", {})
             raw_llm_response = llm_response.get("raw_llm_response", None)
             llm_model_used = llm_response.get("llm_model_used")
+            llm_api_ms = None
+            try:
+                llm_api_ms = int(llm_response.get("timers", {}).get("api_ms"))
+            except Exception:
+                llm_api_ms = None
             
             logger.info(f"Structured extraction completed in {processing_time:.2f}s")
             
@@ -242,7 +247,8 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
                 raw_llm_response=raw_llm_response,
                 timers={
                     "ocr_ms": ((t_ocr_end or 0) - (t_ocr_start or 0)) * 1000,
-                    "llm_ms": ((t_llm_end or 0) - (t_llm_start or 0)) * 1000,
+                    # Prefer precise API latency from provider when available
+                    "llm_ms": float(llm_api_ms) if llm_api_ms is not None else ((t_llm_end or 0) - (t_llm_start or 0)) * 1000,
                     "post_ms": ((time.time()) - (t_post_start or time.time())) * 1000,
                     "total_ms": processing_time * 1000,
                 },
@@ -518,6 +524,9 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
                     walk(new_prefix, child)
             elif isinstance(node, list):
                 # Support list structures within field_mappings by indexing items
+                # If the LLM provided explicit indexed keys like entries[0].field in field_mappings,
+                # we will see them as dict keys above. This list handler is a fallback for arrays
+                # that are represented as lists in the mapping structure.
                 for idx, child in enumerate(node):
                     new_prefix = f"{prefix}[{idx}]" if prefix else f"[{idx}]"
                     walk(new_prefix, child)
