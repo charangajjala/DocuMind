@@ -28,9 +28,10 @@ class DocumentOCRProcessor(DocumentProcessor):
         """
         self.config = config_provider or EnvironmentConfigProvider()
         
-        # Configure image processor with settings from config
-        max_width = self.config.get_config('MAX_IMAGE_WIDTH', 999999)
-        max_height = self.config.get_config('MAX_IMAGE_HEIGHT', 999999) 
+        # Configure image processor with settings from config (quality-preserving defaults)
+        # Default: cap longest side to ~2560px to reduce latency while keeping legibility
+        max_width = self.config.get_config('MAX_IMAGE_WIDTH', 2560)
+        max_height = self.config.get_config('MAX_IMAGE_HEIGHT', 2560)
         enhance_image = self.config.get_config('ENHANCE_IMAGE', False)
         
         self.image_processor = image_processor or PILImageProcessor(

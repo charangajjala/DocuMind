@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { ApiService } from '@/services/api';
 import { ImageWithBoundingBoxes } from '@/components/ImageWithBoundingBoxes';
@@ -70,7 +71,7 @@ export function ImprovedOCRApp() {
   };
   const [fullPromptsUsed, setFullPromptsUsed] = useState<PromptsUsed | null>(null);
   const [rawLlmResponse, setRawLlmResponse] = useState<string | null>(null);
-  const [llmModel, setLlmModel] = useState<'gpt-40' | 'gpt-o4-mini' | 'gpt-5-mini' | 'gpt-5-nano'>('gpt-5-mini');
+  const [llmModel, setLlmModel] = useState<'gpt-40' | 'gpt-o4-mini' | 'gpt-5-mini' | 'gpt-5-nano'>('gpt-o4-mini');
   type GroundingMode = 'ai' | 'manual' | 'hybrid';
   const [groundingMode, setGroundingMode] = useState<GroundingMode>('ai');
   const AVAILABLE_TYPES: Array<'block' | 'paragraph' | 'line' | 'token'> = ['block','paragraph','line','token'];
@@ -83,22 +84,24 @@ export function ImprovedOCRApp() {
   // AI Schema Generator
   const [schemaInstruction, setSchemaInstruction] = useState<string>('');
   const [isGeneratingSchema, setIsGeneratingSchema] = useState<boolean>(false);
+  const [includeImageForSchema, setIncludeImageForSchema] = useState<boolean>(true);
+  const [schemaGenModel, setSchemaGenModel] = useState<'gpt-40' | 'gpt-o4-mini' | 'gpt-5-mini' | 'gpt-5-nano'>('gpt-5-nano');
   const generateSchemaWithAI = async () => {
     if (!imageBase64 && !ocrResults?.full_text) return;
     setIsGeneratingSchema(true);
     setError('');
     try {
       const payload: { imageData?: string; fullText?: string } = {};
-      if (imageBase64) payload.imageData = imageBase64.split(',')[1];
+      if (imageBase64 && includeImageForSchema) payload.imageData = imageBase64.split(',')[1];
       if (ocrResults?.full_text) payload.fullText = ocrResults.full_text;
       console.log('🧩 Schema Generation Request:', {
         hasImage: !!payload.imageData,
         hasFullText: !!payload.fullText,
         instructionProvided: !!schemaInstruction,
-        llmModel,
+        schemaGenModel,
         timestamp: new Date().toISOString(),
       });
-      const res = await ApiService.generateSchema(payload, schemaInstruction || undefined, llmModel);
+      const res = await ApiService.generateSchema(payload, schemaInstruction || undefined, schemaGenModel);
       console.log('🧩 Schema Generation Response:', res);
       if (res.success && res.schema) {
         setSchema(res.schema);
@@ -552,7 +555,25 @@ export function ImprovedOCRApp() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-3">
+                    <div className="space-y-4">
+                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <Label className="text-sm">Use image for schema generation</Label>
+                          <Switch checked={includeImageForSchema} onCheckedChange={setIncludeImageForSchema} />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">Schema Model</span>
+                          <Select value={schemaGenModel} onValueChange={(v) => setSchemaGenModel(v as any)}>
+                            <SelectTrigger className="h-8 w-44"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="gpt-5-mini">gpt-5-mini</SelectItem>
+                              <SelectItem value="gpt-40">gpt-40</SelectItem>
+                              <SelectItem value="gpt-o4-mini">gpt-o4-mini</SelectItem>
+                              <SelectItem value="gpt-5-nano">gpt-5-nano</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
                       <Label htmlFor="schemaInstruction">Instructions (optional)</Label>
                       <Textarea id="schemaInstruction" value={schemaInstruction} onChange={(e) => setSchemaInstruction(e.target.value)} rows={3} placeholder="e.g., Extract party names, dates, totals; use number for amounts; include an array of items with description and amount" />
                       <div className="flex justify-end">

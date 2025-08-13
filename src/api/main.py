@@ -29,7 +29,7 @@ processor = DocumentOCRProcessor(config_provider=config)
 # Initialize structured extraction components with multi-model support
 structured_extractor = None
 llm_providers = {}
-default_llm_model = 'gpt-5-mini'
+default_llm_model = 'gpt-o4-mini'
 manual_grounder = ManualVisualGrounder()
 hybrid_service = None
 try:

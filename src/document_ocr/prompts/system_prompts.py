@@ -77,6 +77,10 @@ FIELD MAPPING RULES (BLOCK IDS):
 • Use a SINGLE integer block id in source_block_id when one OCR block fully contains the value
 • If and only if the value truly spans multiple smallest OCR blocks (e.g., wraps across lines) → use a LIST of integer block ids in source_block_id covering the entire value
 • If no OCR block(s) fully contain the value → use "visual_only" in source_block_id
+• Arrays and nested objects: Use fully-qualified keys for field_mappings. Examples:
+  - entries[0].lessor
+  - entries[0].interest_details[2].interest_holder
+  - items[3].sku
 
 WORKING PRINCIPLES:
 • Precision over speed - accuracy is paramount

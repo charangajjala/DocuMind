@@ -60,7 +60,15 @@ class PILImageProcessor(ImageProcessor):
                 
                 # Convert back to bytes
                 output = io.BytesIO()
-                img.save(output, format=original_format, optimize=True, quality=95)
+                save_kwargs = {"format": original_format}
+                # Prefer high-quality JPEG for photos/docs, PNG for line art; keep optimize on
+                if original_format in ("JPEG", "JPG"):
+                    save_kwargs.update({"optimize": True, "quality": 90, "subsampling": 1})  # 4:2:2 to preserve text edges
+                elif original_format == "PNG":
+                    save_kwargs.update({"optimize": True})
+                else:
+                    save_kwargs.update({"optimize": True, "quality": 90})
+                img.save(output, **save_kwargs)
                 return output.getvalue()
                 
         except Exception as e:
