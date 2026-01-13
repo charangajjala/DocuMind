@@ -169,7 +169,6 @@ class StructuredExtractionRequest(BaseModel):
     document_type: Optional[str] = None  # Document type hint for specialized prompts
     confidence_threshold: float = 0.8
     llm_model: Optional[str] = None  # e.g., 'gpt-40', 'gpt-o4-mini', 'gpt-5-mini', 'gpt-5-nano'
-    allowed_element_types: Optional[list[str]] = None  # Limit OCR blocks passed to LLM context
     
     @model_validator(mode='after')
     def validate_schema_or_prompt(self):

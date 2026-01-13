@@ -38,8 +38,12 @@ class ManualVisualGrounder:
         """
         grounded: List[GroundedDataField] = []
 
-        # Build a simple searchable list of (idx, text, norm_text)
-        blocks = [(i, tb.text, _normalize_text(tb.text)) for i, tb in enumerate(ocr_results.text_blocks or [])]
+        # Build a simple searchable list of (idx, text, norm_text) - only include line-level elements
+        blocks = [
+            (i, tb.text, _normalize_text(tb.text)) 
+            for i, tb in enumerate(ocr_results.text_blocks or [])
+            if str(getattr(tb, 'element_type', 'block')).lower() == 'line'
+        ]
         anchor_set = {a.lower() for a in (anchors or []) if isinstance(a, str) and len(a) > 2}
 
         def _build_number_regex(val: str) -> Optional[re.Pattern]:

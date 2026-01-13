@@ -74,13 +74,6 @@ export function ImprovedOCRApp() {
   const [llmModel, setLlmModel] = useState<'gpt-40' | 'gpt-o4-mini' | 'gpt-5-mini' | 'gpt-5-nano'>('gpt-o4-mini');
   type GroundingMode = 'ai' | 'manual' | 'hybrid';
   const [groundingMode, setGroundingMode] = useState<GroundingMode>('ai');
-  const AVAILABLE_TYPES: Array<'block' | 'paragraph' | 'line' | 'token'> = ['block','paragraph','line','token'];
-  const [allowedElementTypes, setAllowedElementTypes] = useState<Array<'block' | 'paragraph' | 'line' | 'token'>>(['line']);
-  const toggleAllowedType = (t: 'block' | 'paragraph' | 'line' | 'token') => {
-    setAllowedElementTypes(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
-  };
-  const selectAllTypes = () => setAllowedElementTypes(AVAILABLE_TYPES);
-  const clearAllTypes = () => setAllowedElementTypes([]);
   // AI Schema Generator
   const [schemaInstruction, setSchemaInstruction] = useState<string>('');
   const [isGeneratingSchema, setIsGeneratingSchema] = useState<boolean>(false);
@@ -221,7 +214,7 @@ export function ImprovedOCRApp() {
       } else if (groundingMode === 'hybrid') {
         response = await ApiService.extractStructuredDataHybrid(base64Data, jsonSchema, prompt, llmModel);
       } else {
-        response = await ApiService.extractStructuredData(base64Data, jsonSchema, prompt, llmModel, allowedElementTypes);
+        response = await ApiService.extractStructuredData(base64Data, jsonSchema, prompt, llmModel);
       }
       
       console.log('✅ Structured Extraction Response from backend:', response);
@@ -589,33 +582,6 @@ export function ImprovedOCRApp() {
                   initialSchema={schema || undefined}
                   onSchemaChange={setSchema}
                 />
-                {groundingMode === 'ai' && (
-                  <Card className="border shadow-sm">
-                    <CardHeader>
-                      <CardTitle className="text-lg">OCR Element Types for LLM Context</CardTitle>
-                      <CardDescription>
-                        Choose which OCR text element types to include when sending context to the AI model. Default is line.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="text-sm text-muted-foreground">Applies in AI grounding mode only</div>
-                        <div className="flex items-center gap-2">
-                          <Button size="sm" variant="outline" onClick={selectAllTypes} disabled={allowedElementTypes.length === AVAILABLE_TYPES.length}>All</Button>
-                          <Button size="sm" variant="outline" onClick={clearAllTypes} disabled={allowedElementTypes.length === 0}>None</Button>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-4">
-                        {AVAILABLE_TYPES.map(t => (
-                          <label key={t} className="flex items-center gap-2 text-sm">
-                            <input type="checkbox" checked={allowedElementTypes.includes(t)} onChange={() => toggleAllowedType(t)} />
-                            <span className="capitalize">{t}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
                 
                 {/* Extraction Controls */}
                 {((schema && schema.properties && Object.keys(schema.properties).length > 0) || userPrompt.trim().length > 0) && (
@@ -1013,103 +979,6 @@ export function ImprovedOCRApp() {
                        </CardContent>
                     </Card>
                   )}
-
-                  {/* LLM Token and Block Statistics */}
-                  <Card className="border shadow-sm">
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-lg flex items-center gap-2">
-                        <Zap className="h-5 w-5 text-green-600" />
-                        Token & Block Statistics
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <div className="text-center p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                           <div className="text-2xl font-bold text-blue-600">
-                             {fullPromptsUsed.token_estimates?.system_prompt_tokens
-                              ?? fullPromptsUsed.stage1?.token_estimates?.system_prompt_tokens
-                              ?? Math.floor(((fullPromptsUsed.system_prompt || fullPromptsUsed.stage1?.system_prompt || '').length)/4)}
-                          </div>
-                          <div className="text-sm text-muted-foreground">System Prompt Tokens (est.)</div>
-                        </div>
-                        <div className="text-center p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
-                           <div className="text-2xl font-bold text-purple-600">
-                             {fullPromptsUsed.token_estimates?.user_prompt_tokens
-                              ?? fullPromptsUsed.stage1?.token_estimates?.user_prompt_tokens
-                              ?? Math.floor(((fullPromptsUsed.user_prompt || fullPromptsUsed.stage1?.user_prompt || '').length)/4)}
-                          </div>
-                          <div className="text-sm text-muted-foreground">User Prompt Tokens (est.)</div>
-                        </div>
-                        <div className="text-center p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                          <div className="text-2xl font-bold text-green-600">
-                             {fullPromptsUsed.token_estimates?.image_input_tokens
-                              ?? fullPromptsUsed.stage1?.token_estimates?.image_input_tokens
-                              ?? 0}
-                          </div>
-                          <div className="text-sm text-muted-foreground">Image Input Tokens (est.)</div>
-                        </div>
-                        <div className="text-center p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
-                          <div className="text-2xl font-bold text-orange-600">
-                             {fullPromptsUsed.token_estimates?.total_estimated_input_tokens
-                              ?? fullPromptsUsed.stage1?.token_estimates?.total_estimated_input_tokens
-                              ?? (
-                                Math.floor(((fullPromptsUsed.system_prompt || fullPromptsUsed.stage1?.system_prompt || '').length)/4)
-                                + Math.floor(((fullPromptsUsed.user_prompt || fullPromptsUsed.stage1?.user_prompt || '').length)/4)
-                              )}
-                          </div>
-                          <div className="text-sm text-muted-foreground">Total Estimated Input Tokens</div>
-                        </div>
-                      </div>
-                      {/* Block optimization stats */}
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-                        <div className="text-center p-4 bg-slate-50 dark:bg-slate-900/20 rounded-lg">
-                          <div className="text-2xl font-bold text-slate-700">
-                            {ocrResults?.text_blocks?.length ?? 0}
-                          </div>
-                          <div className="text-sm text-muted-foreground">Original OCR Blocks</div>
-                        </div>
-                        <div className="text-center p-4 bg-slate-50 dark:bg-slate-900/20 rounded-lg">
-                          <div className="text-2xl font-bold text-slate-700">
-                            {structuredResults?.prompts_used?.subset_block_count ?? '—'}
-                          </div>
-                          <div className="text-sm text-muted-foreground">Optimized Subset Blocks</div>
-                        </div>
-                        <div className="text-center p-4 bg-slate-50 dark:bg-slate-900/20 rounded-lg">
-                          <div className="text-2xl font-bold text-slate-700">
-                            {(() => {
-                              const orig = ocrResults?.text_blocks?.length ?? 0;
-                              const sub = structuredResults?.prompts_used?.subset_block_count as number | undefined;
-                              if (!orig || !sub && sub !== 0) return '—';
-                              const pct = Math.max(0, Math.min(100, Math.round((1 - sub / orig) * 100)));
-                              return `${pct}%`;
-                            })()}
-                          </div>
-                          <div className="text-sm text-muted-foreground">Block Reduction</div>
-                        </div>
-                       </div>
-                       {/* Mode-specific stats */}
-                       {fullPromptsUsed.mode && (
-                         <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-                           <div className="text-center p-4 bg-slate-50 dark:bg-slate-900/20 rounded-lg">
-                             <div className="text-xs text-muted-foreground">Mode</div>
-                             <div className="text-base font-semibold">{String(fullPromptsUsed.mode)}</div>
-                           </div>
-                           {fullPromptsUsed.stage2?.filtered_block_count !== undefined && (
-                             <div className="text-center p-4 bg-slate-50 dark:bg-slate-900/20 rounded-lg">
-                               <div className="text-xs text-muted-foreground">Filtered Blocks</div>
-                               <div className="text-base font-semibold">{fullPromptsUsed.stage2.filtered_block_count}</div>
-                             </div>
-                           )}
-                           {structuredResults?.grounded_fields && (
-                             <div className="text-center p-4 bg-slate-50 dark:bg-slate-900/20 rounded-lg">
-                               <div className="text-xs text-muted-foreground">Fields Grounded</div>
-                               <div className="text-base font-semibold">{structuredResults.grounded_fields.length}</div>
-                             </div>
-                           )}
-                         </div>
-                       )}
-                    </CardContent>
-                  </Card>
                 </div>
               )}
 

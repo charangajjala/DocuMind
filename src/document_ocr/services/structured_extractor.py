@@ -100,7 +100,6 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
         user_prompt: Optional[str] = None,
         document_type: Optional[str] = None,
         llm_provider_override: Optional[LLMProvider] = None,
-        allowed_element_types: Optional[List[str]] = None,
         precomputed_ocr: Optional[DocumentOCRResult] = None,
     ) -> StructuredExtractionResult:
         """Extract structured data with visual grounding.
@@ -160,32 +159,9 @@ class VisuallyGroundedExtractor(StructuredDataExtractor):
                 logger.warning("No text blocks found in OCR results")
                 ocr_results.text_blocks = []  # Initialize as empty list to prevent None errors
             
-            # Step 3: Optionally filter by allowed element types before building safe subset
-            filtered_ocr = ocr_results
-            try:
-                if allowed_element_types:
-                    allowed = {str(t).lower() for t in allowed_element_types}
-                    filtered_blocks: List = []
-                    for idx, b in enumerate(ocr_results.text_blocks or []):
-                        if str(getattr(b, 'element_type', 'block')).lower() in allowed:
-                            copied = copy.deepcopy(b)
-                            # Preserve stable reference to original index so LLM block_id matches original OCR list
-                            setattr(copied, 'original_index', idx)
-                            filtered_blocks.append(copied)
-                    filtered_ocr = DocumentOCRResult(
-                        full_text=ocr_results.full_text,
-                        text_blocks=filtered_blocks,
-                        image_width=ocr_results.image_width,
-                        image_height=ocr_results.image_height,
-                        processing_time=ocr_results.processing_time,
-                        image_quality=ocr_results.image_quality,
-                        original_image_info=ocr_results.original_image_info,
-                    )
-            except Exception:
-                filtered_ocr = ocr_results
-
-            # Use filtered OCR directly (no additional optimization/subsetting in AI mode)
-            subset_ocr = filtered_ocr
+            # Note: Filtering to line-level elements is now handled in azure_openai_service.py
+            # We pass all OCR results, and the service filters to lines only
+            subset_ocr = ocr_results
 
             # Step 4: Extract structured data using LLM (with subset)
             logger.info("Extracting structured data with LLM")

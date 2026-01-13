@@ -345,7 +345,6 @@ async def extract_structured_data(request: StructuredExtractionRequest):
             user_prompt=request.user_prompt,
             document_type=request.document_type,
             llm_provider_override=provider,
-            allowed_element_types=request.allowed_element_types,
             precomputed_ocr=precomputed_ocr
         )
         
@@ -652,7 +651,6 @@ async def extract_structured_data_hybrid(request: StructuredExtractionRequest):
         # Filter OCR blocks
         rag = HybridGroundingService(provider)
         filtered_ids = rag._filter_blocks(extracted_data, reasoning_map, ocr)
-        # Ignore allowed_element_types in hybrid mode (filter is AI-only by design)
 
         # Stage 2: LLM grounding from filtered blocks (no image)
         stage2 = await rag.stage2_ground(extracted_data, ocr, filtered_ids)
