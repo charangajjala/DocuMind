@@ -73,8 +73,7 @@ export class ApiService {
     imageData: string,
     jsonSchema?: any,
     userPrompt?: string,
-    llmModel?: 'gpt-40' | 'gpt-o4-mini' | 'gpt-5-mini' | 'gpt-5-nano',
-    allowedElementTypes?: Array<'block' | 'paragraph' | 'line' | 'token'>
+    llmModel?: 'gpt-40' | 'gpt-o4-mini' | 'gpt-5-mini' | 'gpt-5-nano'
   ): Promise<ExtractionResult> {
     // Validate that at least one of schema or prompt is provided
     if (!jsonSchema && !userPrompt) {
@@ -86,7 +85,6 @@ export class ApiService {
       json_schema: jsonSchema,
       user_prompt: userPrompt,
       llm_model: llmModel,
-      allowed_element_types: allowedElementTypes,
     };
 
     const response = await fetch(`${API_BASE_URL}/extract/structured`, {
@@ -104,8 +102,7 @@ export class ApiService {
     imageData: string,
     jsonSchema?: any,
     userPrompt?: string,
-    llmModel?: 'gpt-40' | 'gpt-o4-mini' | 'gpt-5-mini' | 'gpt-5-nano',
-    allowedElementTypes?: Array<'block' | 'paragraph' | 'line' | 'token'>
+    llmModel?: 'gpt-40' | 'gpt-o4-mini' | 'gpt-5-mini' | 'gpt-5-nano'
   ): Promise<ExtractionResult> {
     if (!jsonSchema && !userPrompt) {
       throw new Error('Either jsonSchema or userPrompt must be provided');
@@ -116,7 +113,6 @@ export class ApiService {
       json_schema: jsonSchema,
       user_prompt: userPrompt,
       llm_model: llmModel,
-      allowed_element_types: allowedElementTypes,
     };
 
     const response = await fetch(`${API_BASE_URL}/extract/structured/ocr-only`, {
@@ -134,8 +130,7 @@ export class ApiService {
     imageData: string,
     jsonSchema?: any,
     userPrompt?: string,
-    llmModel?: 'gpt-40' | 'gpt-o4-mini' | 'gpt-5-mini' | 'gpt-5-nano',
-    allowedElementTypes?: Array<'block' | 'paragraph' | 'line' | 'token'>
+    llmModel?: 'gpt-40' | 'gpt-o4-mini' | 'gpt-5-mini' | 'gpt-5-nano'
   ): Promise<ExtractionResult> {
     if (!jsonSchema && !userPrompt) {
       throw new Error('Either jsonSchema or userPrompt must be provided');
@@ -146,7 +141,6 @@ export class ApiService {
       json_schema: jsonSchema,
       user_prompt: userPrompt,
       llm_model: llmModel,
-      allowed_element_types: allowedElementTypes,
     };
 
     const response = await fetch(`${API_BASE_URL}/extract/structured/hybrid`, {

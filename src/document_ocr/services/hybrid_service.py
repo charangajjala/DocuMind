@@ -41,8 +41,15 @@ class HybridGroundingService:
         values = list(each_value(extracted_data))
         norm_values = [_normalize(v) for v in values if v is not None]
 
-        # lexical substring match
-        for idx, tb in enumerate(ocr.text_blocks):
+        # Filter to only line-level elements for all matching operations
+        line_blocks = [
+            (idx, tb) 
+            for idx, tb in enumerate(ocr.text_blocks) 
+            if str(getattr(tb, 'element_type', 'block')).lower() == 'line'
+        ]
+
+        # lexical substring match (only on line-level blocks)
+        for idx, tb in line_blocks:
             nt = _normalize(tb.text)
             for v in norm_values:
                 if v and v in nt:
@@ -58,7 +65,7 @@ class HybridGroundingService:
             anchor_terms.extend([w for w in re.split(r"\W+", v.lower()) if len(w) > 2])
 
         anchor_terms = list({a for a in anchor_terms})
-        for idx, tb in enumerate(ocr.text_blocks):
+        for idx, tb in line_blocks:
             nt = _normalize(tb.text)
             hits = sum(1 for a in anchor_terms if a in nt)
             if hits >= 1:
@@ -76,7 +83,7 @@ class HybridGroundingService:
         query_terms.update(anchor_terms)
 
         scores: List[Tuple[int, float]] = []
-        for idx, tb in enumerate(ocr.text_blocks):
+        for idx, tb in line_blocks:
             nt = _normalize(tb.text)
             block_terms = set([t for t in re.split(r"\W+", nt) if t])
             block_terms.update(ngrams(list(block_terms), 2))
