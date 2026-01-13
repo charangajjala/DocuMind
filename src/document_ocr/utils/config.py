@@ -46,12 +46,15 @@ class EnvironmentConfigProvider(ConfigurationProvider):
         self._config_cache = {
             'GOOGLE_APPLICATION_CREDENTIALS': os.getenv('GOOGLE_APPLICATION_CREDENTIALS'),
             'GOOGLE_CLOUD_PROJECT': os.getenv('GOOGLE_CLOUD_PROJECT'),
-            'DOCUMENT_AI_PROCESSOR_ID': os.getenv('DOCUMENT_AI_PROCESSOR_ID'),
-            'DOCUMENT_AI_LOCATION': os.getenv('DOCUMENT_AI_LOCATION', 'us'),
-            'AZURE_OPENAI_API_KEY': os.getenv('AZURE_OPENAI_API_KEY'),
-            'AZURE_OPENAI_ENDPOINT': os.getenv('AZURE_OPENAI_ENDPOINT'),
-            'AZURE_OPENAI_DEPLOYMENT_NAME': os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', 'gpt-4o'),
-            'AZURE_OPENAI_API_VERSION': os.getenv('AZURE_OPENAI_API_VERSION', '2024-05-13'),
+            'DOCUMENT_AI_PROCESSOR_ID': os.getenv('DOCUMENT_AI_PROCESSOR_ID') or os.getenv('GOOGLE_DOCUMENT_AI_PROCESSOR_ID'),
+            'DOCUMENT_AI_LOCATION': os.getenv('DOCUMENT_AI_LOCATION') or os.getenv('GOOGLE_DOCUMENT_AI_LOCATION', 'us'),
+            # OpenAI variables
+            'OPENAI_API_KEY': os.getenv('OPENAI_API_KEY'),
+            'OPENAI_ENDPOINT': os.getenv('OPENAI_ENDPOINT'),
+            'OPENAI_DEPLOYMENT_NAME': os.getenv('OPENAI_DEPLOYMENT_NAME', 'gpt-4o'),
+            'OPENAI_API_VERSION': os.getenv('OPENAI_API_VERSION', '2025-01-01-preview'),
+            'OPENAI_BASE_URL': os.getenv('OPENAI_BASE_URL'),
+            'OPENAI_MODEL': os.getenv('OPENAI_MODEL', 'gpt-4o'),
             'API_HOST': os.getenv('API_HOST', '0.0.0.0'),
             'API_PORT': int(os.getenv('API_PORT', '8000')),
             'STREAMLIT_HOST': os.getenv('STREAMLIT_HOST', '0.0.0.0'),
@@ -65,31 +68,31 @@ class EnvironmentConfigProvider(ConfigurationProvider):
             'MAX_IMAGE_WIDTH': int(os.getenv('MAX_IMAGE_WIDTH', '4096')),
             'MAX_IMAGE_HEIGHT': int(os.getenv('MAX_IMAGE_HEIGHT', '4096')),
             'ENHANCE_IMAGE': os.getenv('ENHANCE_IMAGE', 'false').lower() == 'true',
-            # Optional model-specific Azure OpenAI configs (per-model overrides)
+            # Optional model-specific OpenAI configs (per-model overrides)
             # Example expected keys:
-            #  AZURE_OPENAI_API_KEY_GPT_40, AZURE_OPENAI_ENDPOINT_GPT_40, AZURE_OPENAI_DEPLOYMENT_NAME_GPT_40
-            #  AZURE_OPENAI_API_KEY_GPT_O4_MINI, ...
-            #  AZURE_OPENAI_API_KEY_GPT_5_MINI, ...
-            #  AZURE_OPENAI_API_KEY_GPT_5_NANO, ...
-            'AZURE_OPENAI_API_KEY_GPT_40': os.getenv('AZURE_OPENAI_API_KEY_GPT_40'),
-            'AZURE_OPENAI_ENDPOINT_GPT_40': os.getenv('AZURE_OPENAI_ENDPOINT_GPT_40'),
-            'AZURE_OPENAI_DEPLOYMENT_NAME_GPT_40': os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME_GPT_40'),
-            'AZURE_OPENAI_API_VERSION_GPT_40': os.getenv('AZURE_OPENAI_API_VERSION_GPT_40'),
+            #  OPENAI_API_KEY_GPT_40, OPENAI_ENDPOINT_GPT_40, OPENAI_DEPLOYMENT_NAME_GPT_40
+            #  OPENAI_API_KEY_GPT_O4_MINI, ...
+            #  OPENAI_API_KEY_GPT_5_MINI, ...
+            #  OPENAI_API_KEY_GPT_5_NANO, ...
+            'OPENAI_API_KEY_GPT_40': os.getenv('OPENAI_API_KEY_GPT_40'),
+            'OPENAI_ENDPOINT_GPT_40': os.getenv('OPENAI_ENDPOINT_GPT_40'),
+            'OPENAI_DEPLOYMENT_NAME_GPT_40': os.getenv('OPENAI_DEPLOYMENT_NAME_GPT_40'),
+            'OPENAI_API_VERSION_GPT_40': os.getenv('OPENAI_API_VERSION_GPT_40'),
 
-            'AZURE_OPENAI_API_KEY_GPT_O4_MINI': os.getenv('AZURE_OPENAI_API_KEY_GPT_O4_MINI'),
-            'AZURE_OPENAI_ENDPOINT_GPT_O4_MINI': os.getenv('AZURE_OPENAI_ENDPOINT_GPT_O4_MINI'),
-            'AZURE_OPENAI_DEPLOYMENT_NAME_GPT_O4_MINI': os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME_GPT_O4_MINI'),
-            'AZURE_OPENAI_API_VERSION_GPT_O4_MINI': os.getenv('AZURE_OPENAI_API_VERSION_GPT_O4_MINI'),
+            'OPENAI_API_KEY_GPT_O4_MINI': os.getenv('OPENAI_API_KEY_GPT_O4_MINI'),
+            'OPENAI_ENDPOINT_GPT_O4_MINI': os.getenv('OPENAI_ENDPOINT_GPT_O4_MINI'),
+            'OPENAI_DEPLOYMENT_NAME_GPT_O4_MINI': os.getenv('OPENAI_DEPLOYMENT_NAME_GPT_O4_MINI'),
+            'OPENAI_API_VERSION_GPT_O4_MINI': os.getenv('OPENAI_API_VERSION_GPT_O4_MINI'),
 
-            'AZURE_OPENAI_API_KEY_GPT_5_MINI': os.getenv('AZURE_OPENAI_API_KEY_GPT_5_MINI'),
-            'AZURE_OPENAI_ENDPOINT_GPT_5_MINI': os.getenv('AZURE_OPENAI_ENDPOINT_GPT_5_MINI'),
-            'AZURE_OPENAI_DEPLOYMENT_NAME_GPT_5_MINI': os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME_GPT_5_MINI'),
-            'AZURE_OPENAI_API_VERSION_GPT_5_MINI': os.getenv('AZURE_OPENAI_API_VERSION_GPT_5_MINI'),
+            'OPENAI_API_KEY_GPT_5_MINI': os.getenv('OPENAI_API_KEY_GPT_5_MINI'),
+            'OPENAI_ENDPOINT_GPT_5_MINI': os.getenv('OPENAI_ENDPOINT_GPT_5_MINI'),
+            'OPENAI_DEPLOYMENT_NAME_GPT_5_MINI': os.getenv('OPENAI_DEPLOYMENT_NAME_GPT_5_MINI'),
+            'OPENAI_API_VERSION_GPT_5_MINI': os.getenv('OPENAI_API_VERSION_GPT_5_MINI'),
 
-            'AZURE_OPENAI_API_KEY_GPT_5_NANO': os.getenv('AZURE_OPENAI_API_KEY_GPT_5_NANO'),
-            'AZURE_OPENAI_ENDPOINT_GPT_5_NANO': os.getenv('AZURE_OPENAI_ENDPOINT_GPT_5_NANO'),
-            'AZURE_OPENAI_DEPLOYMENT_NAME_GPT_5_NANO': os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME_GPT_5_NANO'),
-            'AZURE_OPENAI_API_VERSION_GPT_5_NANO': os.getenv('AZURE_OPENAI_API_VERSION_GPT_5_NANO'),
+            'OPENAI_API_KEY_GPT_5_NANO': os.getenv('OPENAI_API_KEY_GPT_5_NANO'),
+            'OPENAI_ENDPOINT_GPT_5_NANO': os.getenv('OPENAI_ENDPOINT_GPT_5_NANO'),
+            'OPENAI_DEPLOYMENT_NAME_GPT_5_NANO': os.getenv('OPENAI_DEPLOYMENT_NAME_GPT_5_NANO'),
+            'OPENAI_API_VERSION_GPT_5_NANO': os.getenv('OPENAI_API_VERSION_GPT_5_NANO'),
         }
         
         # Load from config file if specified and dotenv not available
@@ -133,31 +136,67 @@ class EnvironmentConfigProvider(ConfigurationProvider):
         return model_key.upper().replace('-', '_')
 
     def get_llm_model_config(self, model_key: str) -> Dict[str, Any]:
-        """Return Azure OpenAI config for a specific model key, falling back to global keys.
+        """Return OpenAI config for a specific model key, falling back to global keys.
+        
+        Works for both Azure OpenAI and Direct OpenAI API.
 
         Expected env keys for a given model suffix S:
-          AZURE_OPENAI_API_KEY_S, AZURE_OPENAI_ENDPOINT_S, AZURE_OPENAI_DEPLOYMENT_NAME_S, AZURE_OPENAI_API_VERSION_S
+          OPENAI_API_KEY_S
+          OPENAI_ENDPOINT_S - for Azure
+          OPENAI_DEPLOYMENT_NAME_S - for Azure
+          OPENAI_API_VERSION_S - for Azure
+          OPENAI_BASE_URL_S - for Direct OpenAI
+          OPENAI_MODEL_S - for Direct OpenAI
         """
         suffix = self._normalize_model_key(model_key)
-        api_key = self.get_config(f'AZURE_OPENAI_API_KEY_{suffix}') or self.get_config('AZURE_OPENAI_API_KEY')
-        endpoint = self.get_config(f'AZURE_OPENAI_ENDPOINT_{suffix}') or self.get_config('AZURE_OPENAI_ENDPOINT')
-        deployment = self.get_config(f'AZURE_OPENAI_DEPLOYMENT_NAME_{suffix}') or self.get_config('AZURE_OPENAI_DEPLOYMENT_NAME')
-        api_version = self.get_config(f'AZURE_OPENAI_API_VERSION_{suffix}') or self.get_config('AZURE_OPENAI_API_VERSION', '2025-01-01-preview')
+        
+        api_key = (self.get_config(f'OPENAI_API_KEY_{suffix}') or
+                  self.get_config('OPENAI_API_KEY'))
+        
+        endpoint = (self.get_config(f'OPENAI_ENDPOINT_{suffix}') or
+                   self.get_config('OPENAI_ENDPOINT'))
+        
+        deployment = (self.get_config(f'OPENAI_DEPLOYMENT_NAME_{suffix}') or
+                     self.get_config('OPENAI_DEPLOYMENT_NAME'))
+        
+        api_version = (self.get_config(f'OPENAI_API_VERSION_{suffix}') or
+                      self.get_config('OPENAI_API_VERSION', '2025-01-01-preview'))
+        
+        base_url = (self.get_config(f'OPENAI_BASE_URL_{suffix}') or
+                   self.get_config('OPENAI_BASE_URL'))
+        
+        model = (self.get_config(f'OPENAI_MODEL_{suffix}') or
+                self.get_config('OPENAI_MODEL', 'gpt-4o'))
+        
         return {
             'api_key': api_key,
             'endpoint': endpoint,
             'deployment': deployment,
             'api_version': api_version,
+            'base_url': base_url,
+            'model': model,
         }
 
     def list_available_llm_models(self, candidates: Optional[list] = None) -> Dict[str, Dict[str, Any]]:
-        """Return a mapping of model_key -> config for all candidates that are fully configured."""
+        """Return a mapping of model_key -> config for all candidates that are fully configured.
+        
+        For Azure OpenAI: requires api_key, endpoint, and deployment
+        For Direct OpenAI: requires api_key and model (endpoint/deployment not needed)
+        """
         if candidates is None:
             candidates = ['gpt-40', 'gpt-o4-mini', 'gpt-5-mini', 'gpt-5-nano']
         available: Dict[str, Dict[str, Any]] = {}
         for key in candidates:
             cfg = self.get_llm_model_config(key)
-            if cfg.get('api_key') and cfg.get('endpoint') and cfg.get('deployment'):
+            api_key = cfg.get('api_key')
+            if not api_key:
+                continue
+            
+            # Check if Azure OpenAI (requires endpoint and deployment)
+            if cfg.get('endpoint') and cfg.get('deployment'):
+                available[key] = cfg
+            # Check if Direct OpenAI (requires model, endpoint/deployment not needed)
+            elif cfg.get('model'):
                 available[key] = cfg
         return available
     

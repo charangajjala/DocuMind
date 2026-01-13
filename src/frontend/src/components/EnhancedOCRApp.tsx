@@ -183,13 +183,13 @@ export function EnhancedOCRApp() {
 
       // Check for various error conditions
       if (errorString.includes('Azure OpenAI service not configured')) {
-        errorMessage = 'Azure OpenAI service is not configured. Please set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT environment variables in your backend configuration.';
+        errorMessage = 'OpenAI service is not configured. Please set OPENAI_API_KEY (and OPENAI_ENDPOINT/OPENAI_DEPLOYMENT_NAME for Azure, or OPENAI_MODEL for Direct API) in your backend configuration.';
         setAzureConfigStatus('not-configured');
       } else if (errorString.includes('404') || errorString.includes('Resource not found') || errorString.includes('Error code: 404')) {
-        errorMessage = '🔧 Azure OpenAI Configuration Issue: The deployment was not found. Please check:\n\n• AZURE_OPENAI_DEPLOYMENT_NAME is correct\n• The deployment exists in your Azure OpenAI resource\n• The deployment is active and not deleted\n• Your endpoint URL is correct';
+        errorMessage = '🔧 OpenAI Configuration Issue: The deployment was not found. Please check:\n\n• OPENAI_DEPLOYMENT_NAME is correct\n• The deployment exists in your Azure OpenAI resource\n• The deployment is active and not deleted\n• Your endpoint URL is correct';
         setAzureConfigStatus('not-configured');
       } else if (errorString.includes('401') || errorString.includes('Error code: 401')) {
-        errorMessage = '🔑 Authentication Error: Please check your AZURE_OPENAI_API_KEY configuration. Make sure the API key is valid and has not expired.';
+        errorMessage = '🔑 Authentication Error: Please check your OPENAI_API_KEY configuration. Make sure the API key is valid and has not expired.';
         setAzureConfigStatus('not-configured');
       } else if (errorString.includes('403') || errorString.includes('Error code: 403')) {
         errorMessage = '🚫 Access Denied: Please check your Azure OpenAI resource permissions and ensure your API key has the correct access rights.';
@@ -789,9 +789,9 @@ export function EnhancedOCRApp() {
                                             <p><strong>Azure OpenAI Configuration Required</strong></p>
                                             <p>To enable structured data extraction, please configure Azure OpenAI in your backend:</p>
                                             <ul className="list-disc list-inside text-sm space-y-1 mt-2">
-                                              <li>Set <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">AZURE_OPENAI_API_KEY</code></li>
-                                              <li>Set <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">AZURE_OPENAI_ENDPOINT</code></li>
-                                              <li>Set <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">AZURE_OPENAI_DEPLOYMENT_NAME</code></li>
+                                              <li>Set <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">OPENAI_API_KEY</code></li>
+                                              <li>Set <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">OPENAI_ENDPOINT</code> (for Azure)</li>
+                                              <li>Set <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">OPENAI_DEPLOYMENT_NAME</code> (for Azure)</li>
                                             </ul>
                                             <div className="mt-3">
                                               <Button 

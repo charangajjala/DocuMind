@@ -258,7 +258,7 @@ export function ImprovedOCRApp() {
       }
 
       if (errorString.includes('Azure OpenAI service not configured')) {
-        errorMessage = 'Azure OpenAI service is not configured. Please set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT environment variables in your backend configuration.';
+        errorMessage = 'OpenAI service is not configured. Please set OPENAI_API_KEY (and OPENAI_ENDPOINT/OPENAI_DEPLOYMENT_NAME for Azure, or OPENAI_MODEL for Direct API) in your backend configuration.';
         setAzureConfigStatus('not-configured');
       } else if (errorString.includes('404') || errorString.includes('Resource not found') || errorString.includes('Error code: 404')) {
         errorMessage = '🔧 Azure OpenAI Configuration Issue: The deployment was not found. Please check your configuration.';

@@ -7,7 +7,7 @@ import logging
 from typing import Dict, Any, Optional
 import asyncio
 
-from openai import AsyncAzureOpenAI
+from openai import AsyncAzureOpenAI, AsyncOpenAI
 from PIL import Image
 
 from ..core.interfaces import LLMProvider
@@ -36,37 +36,71 @@ class AzureOpenAIError(DocumentOCRError):
 
 
 class AzureOpenAIService(LLMProvider):
-    """Azure OpenAI service implementation for structured data extraction."""
+    """OpenAI service implementation for structured data extraction.
+    
+    Supports both Azure OpenAI and direct OpenAI API.
+    """
     
     def __init__(
         self,
         api_key: str,
-        endpoint: str,
-        deployment: str,
-        api_version: str = "2025-01-01-preview"
+        endpoint: Optional[str] = None,
+        deployment: Optional[str] = None,
+        api_version: Optional[str] = None,
+        base_url: Optional[str] = None,
+        model: Optional[str] = None
     ):
-        """Initialize Azure OpenAI service.
+        """Initialize OpenAI service (Azure or Direct).
         
         Args:
-            api_key: Azure OpenAI API key
-            endpoint: Azure OpenAI endpoint URL
-            deployment: Deployment name for GPT-4o model
-            api_version: API version to use
+            api_key: OpenAI API key (required)
+            endpoint: Azure OpenAI endpoint URL (required for Azure)
+            deployment: Azure deployment name (required for Azure)
+            api_version: Azure API version (required for Azure)
+            base_url: Direct OpenAI base URL (optional, defaults to api.openai.com/v1)
+            model: Direct OpenAI model name (optional, defaults to gpt-4o)
         """
-        self.client = AsyncAzureOpenAI(
-            api_key=api_key,
-            azure_endpoint=endpoint,
-            api_version=api_version
-        )
-        self.deployment = deployment
-        self.endpoint = endpoint
         self.api_key = api_key
+        self.endpoint = endpoint
+        self.deployment = deployment
+        self.api_version = api_version
+        self.base_url = base_url or "https://api.openai.com/v1"
+        self.model = model or "gpt-4o"
+        
+        # Determine if using Azure or Direct OpenAI
+        self.is_azure = endpoint is not None and deployment is not None
+        
+        if self.is_azure:
+            # Azure OpenAI
+            if not api_version:
+                api_version = "2025-01-01-preview"
+            self.client = AsyncAzureOpenAI(
+                api_key=api_key,
+                azure_endpoint=endpoint,
+                api_version=api_version
+            )
+            self.model = deployment  # For Azure, deployment name is used as model
+        else:
+            # Direct OpenAI API
+            self.client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=base_url
+            )
+            # For direct API, use model name directly
+        
         self._validate_configuration()
     
     def _validate_configuration(self) -> None:
-        """Validate the Azure OpenAI configuration."""
+        """Validate the OpenAI configuration."""
         if not self.api_key:
-            raise AzureOpenAIError("Azure OpenAI API key is required")
+            raise AzureOpenAIError("OpenAI API key is required")
+        
+        if self.is_azure:
+            if not self.endpoint:
+                raise AzureOpenAIError("Azure OpenAI endpoint is required")
+            if not self.deployment:
+                raise AzureOpenAIError("Azure OpenAI deployment name is required")
+    
     def _normalize_field_mappings(self, field_mappings: Dict[str, Any], extracted_data: Dict[str, Any]) -> Dict[str, Any]:
         """Ensure arrays in field_mappings are expanded into per-index entries.
 
@@ -203,7 +237,7 @@ class AzureOpenAIService(LLMProvider):
             import time as _time
             _api_start = _time.time()
             response = await self.client.chat.completions.create(
-                model=self.deployment,
+                model=self.model,
                 messages=messages,
                 response_format={"type": "json_object"}
             )
@@ -247,7 +281,7 @@ class AzureOpenAIService(LLMProvider):
                 },
             }
             llm_full_response["raw_llm_response"] = raw_llm_response
-            llm_full_response["llm_model_used"] = self.deployment
+            llm_full_response["llm_model_used"] = self.model
             llm_full_response["timers"] = {
                 "api_ms": int((_api_end - _api_start) * 1000)
             }
@@ -320,7 +354,7 @@ class AzureOpenAIService(LLMProvider):
             user_tokens = _approx(final_user_prompt)
 
             response = await self.client.chat.completions.create(
-                model=self.deployment,
+                model=self.model,
                 messages=messages,
                 response_format={"type": "json_object"}
             )
@@ -395,7 +429,7 @@ class AzureOpenAIService(LLMProvider):
                 messages.append({"role": "user", "content": user_text})
 
             response = await self.client.chat.completions.create(
-                model=self.deployment,
+                model=self.model,
                 messages=messages,
                 response_format={"type": "json_object"}
             )
@@ -421,7 +455,7 @@ class AzureOpenAIService(LLMProvider):
                     },
                 },
                 "raw_llm_response": raw,
-                "llm_model_used": self.deployment,
+                "llm_model_used": self.model,
             }
         except json.JSONDecodeError as e:
             raise AzureOpenAIError(f"Invalid JSON response while generating schema: {e}")
@@ -498,8 +532,8 @@ class AzureOpenAIService(LLMProvider):
             # This would typically require a different API call
             # For now, return basic info
             return {
-                "deployment": self.deployment,
-                "model": "gpt-4o",
+                "deployment": self.deployment if self.is_azure else None,
+                "model": self.model,
                 "capabilities": ["vision", "json_output", "structured_extraction"],
                 "max_tokens": 4000
             }

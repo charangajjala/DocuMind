@@ -37,25 +37,46 @@ try:
     available = config.list_available_llm_models(['gpt-40', 'gpt-o4-mini', 'gpt-5-mini', 'gpt-5-nano'])
     if not available:
         # Fallback to generic keys
-        azure_api_key = config.get_config('AZURE_OPENAI_API_KEY')
-        azure_endpoint = config.get_config('AZURE_OPENAI_ENDPOINT')
-        azure_deployment = config.get_config('AZURE_OPENAI_DEPLOYMENT_NAME')
-        if azure_api_key and azure_endpoint and azure_deployment:
-            llm_providers[default_llm_model] = AzureOpenAIService(
-                api_key=azure_api_key,
-                endpoint=azure_endpoint,
-                deployment=azure_deployment,
-                api_version=config.get_config('AZURE_OPENAI_API_VERSION', '2025-01-01-preview')
-            )
+        api_key = config.get_config('OPENAI_API_KEY')
+        endpoint = config.get_config('OPENAI_ENDPOINT')
+        deployment = config.get_config('OPENAI_DEPLOYMENT_NAME')
+        base_url = config.get_config('OPENAI_BASE_URL')
+        model = config.get_config('OPENAI_MODEL', 'gpt-4o')
+        
+        if api_key:
+            if endpoint and deployment:
+                # Azure OpenAI
+                llm_providers[default_llm_model] = AzureOpenAIService(
+                    api_key=api_key,
+                    endpoint=endpoint,
+                    deployment=deployment,
+                    api_version=config.get_config('OPENAI_API_VERSION', '2025-01-01-preview')
+                )
+            else:
+                # Direct OpenAI API
+                llm_providers[default_llm_model] = AzureOpenAIService(
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=model
+                )
     else:
         for model_key, cfg in available.items():
             try:
-                llm_providers[model_key] = AzureOpenAIService(
-                    api_key=cfg['api_key'],
-                    endpoint=cfg['endpoint'],
-                    deployment=cfg['deployment'],
-                    api_version=cfg.get('api_version') or '2025-01-01-preview'
-                )
+                if cfg.get('endpoint') and cfg.get('deployment'):
+                    # Azure OpenAI
+                    llm_providers[model_key] = AzureOpenAIService(
+                        api_key=cfg['api_key'],
+                        endpoint=cfg['endpoint'],
+                        deployment=cfg['deployment'],
+                        api_version=cfg.get('api_version') or '2025-01-01-preview'
+                    )
+                else:
+                    # Direct OpenAI API
+                    llm_providers[model_key] = AzureOpenAIService(
+                        api_key=cfg['api_key'],
+                        base_url=cfg.get('base_url'),
+                        model=cfg.get('model', 'gpt-4o')
+                    )
             except Exception as e:
                 print(f"⚠️ Failed to init provider for {model_key}: {e}")
 
@@ -72,11 +93,11 @@ try:
         )
         # Initialize hybrid service with default provider (we will select per-request if needed)
         hybrid_service = HybridGroundingService(llm_providers[default_llm_model])
-        print(f"✅ Azure OpenAI structured extraction initialized. Models: {list(llm_providers.keys())}, default='{default_llm_model}'")
+        print(f"✅ OpenAI structured extraction initialized. Models: {list(llm_providers.keys())}, default='{default_llm_model}'")
     else:
-        print("⚠️ Azure OpenAI not configured - structured extraction unavailable")
+        print("⚠️ OpenAI not configured - structured extraction unavailable")
 except Exception as e:
-    print(f"⚠️ Failed to initialize Azure OpenAI multi-model setup: {e}")
+    print(f"⚠️ Failed to initialize OpenAI multi-model setup: {e}")
     structured_extractor = None
 
 # Configuration updated to use 2025-01-01-preview API version
@@ -129,7 +150,7 @@ async def health_check():
             "status": "healthy",
             "service": "document-ocr-api",
             "google_document_ai": "configured",
-            "azure_openai": "configured" if azure_configured else "not_configured"
+            "openai": "configured" if azure_configured else "not_configured"
         }
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Service unhealthy: {str(e)}")
@@ -313,7 +334,7 @@ async def extract_structured_data(request: StructuredExtractionRequest):
     if not structured_extractor:
         raise HTTPException(
             status_code=503, 
-            detail="Azure OpenAI service not configured. Please set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT"
+            detail="OpenAI service not configured. Please set OPENAI_API_KEY (and OPENAI_ENDPOINT/OPENAI_DEPLOYMENT_NAME for Azure, or OPENAI_MODEL for Direct API)"
         )
     
     try:
@@ -451,7 +472,7 @@ async def extract_structured_data_ocr_only(request: StructuredExtractionRequest)
     if not structured_extractor:
         raise HTTPException(
             status_code=503,
-            detail="Azure OpenAI service not configured. Please set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT"
+            detail="OpenAI service not configured. Please set OPENAI_API_KEY (and OPENAI_ENDPOINT/OPENAI_DEPLOYMENT_NAME for Azure, or OPENAI_MODEL for Direct API)"
         )
 
     try:
@@ -619,7 +640,7 @@ async def extract_structured_data_hybrid(request: StructuredExtractionRequest):
     if not structured_extractor:
         raise HTTPException(
             status_code=503,
-            detail="Azure OpenAI service not configured. Please set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT"
+            detail="OpenAI service not configured. Please set OPENAI_API_KEY (and OPENAI_ENDPOINT/OPENAI_DEPLOYMENT_NAME for Azure, or OPENAI_MODEL for Direct API)"
         )
     try:
         # Decode base64 image
@@ -824,7 +845,7 @@ async def validate_schema(schema: dict):
 async def generate_schema(request: SchemaGenerationRequest):
     """Generate a draft JSON schema from the document using OCR + LLM."""
     if not structured_extractor:
-        raise HTTPException(status_code=503, detail="Azure OpenAI service not configured. Please set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT")
+        raise HTTPException(status_code=503, detail="OpenAI service not configured. Please set OPENAI_API_KEY (and OPENAI_ENDPOINT/OPENAI_DEPLOYMENT_NAME for Azure, or OPENAI_MODEL for Direct API)")
 
     try:
         image_data = None
