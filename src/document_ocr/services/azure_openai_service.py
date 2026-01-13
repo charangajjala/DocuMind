@@ -437,9 +437,15 @@ class AzureOpenAIService(LLMProvider):
         """Create system prompt for structured data extraction using modular prompts."""
         
         # Convert OCR results to a structured format for the LLM.
+        # Filter to only include line-level elements for LLM input.
         # Use stable original indices when provided to preserve ID consistency.
         ocr_text_blocks = []
         for i, block in enumerate(ocr_results.text_blocks):
+            # Only include line-level elements
+            element_type = str(getattr(block, 'element_type', 'block')).lower()
+            if element_type != 'line':
+                continue
+                
             stable_id = block.original_index if getattr(block, "original_index", None) is not None else i
             ocr_text_blocks.append({
                 "block_id": stable_id,

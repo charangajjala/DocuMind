@@ -91,11 +91,15 @@ class HybridGroundingService:
         return sorted(candidates)
 
     async def stage2_ground(self, extracted_data: Dict[str, Any], ocr: DocumentOCRResult, filtered_ids: List[int]) -> Dict[str, Any]:
-        # Build filtered block dict for prompt
+        # Build filtered block dict for prompt - only include line-level elements
         filtered = []
         for bid in filtered_ids:
             if 0 <= bid < len(ocr.text_blocks):
                 tb = ocr.text_blocks[bid]
+                # Only include line-level elements
+                element_type = str(getattr(tb, 'element_type', 'block')).lower()
+                if element_type != 'line':
+                    continue
                 filtered.append({
                     "block_id": bid,
                     "text": tb.text,

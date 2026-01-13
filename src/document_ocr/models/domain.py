@@ -2,7 +2,7 @@
 
 from typing import List, Optional, Tuple, Dict, Any
 from dataclasses import dataclass
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 from enum import Enum
 
 
@@ -378,40 +378,27 @@ class SchemaGenerationRequest(BaseModel):
 
 class SchemaGenerationResponse(BaseModel):
     success: bool
-    schema: Optional[dict] = None
+    json_schema: Optional[dict] = Field(None, alias="schema", description="Generated JSON schema")
     prompts_used: Optional[dict] = None
     raw_llm_response: Optional[str] = None
     error_message: Optional[str] = None
     llm_model_used: Optional[str] = None
     
     class Config:
+        populate_by_name = True
         json_schema_extra = {
             "example": {
                 "success": True,
-                "extracted_data": {
-                    "field_1": "VALUE-001",
-                    "field_2": "2024-08-06",
-                    "field_3": 1250.00,
-                    "items": [
-                        {"description": "Item A", "quantity": 2, "price": 500.00},
-                        {"description": "Item B", "quantity": 1, "price": 250.00}
-                    ]
-                },
-                "grounded_fields": [
-                    {
-                        "field_name": "field_1",
-                        "value": "VALUE-001",
-                        "confidence": 0.95,
-                        "source_text_blocks": [0, 1],
-                        "reasoning": "This field was extracted from the header section of the document. The value 'VALUE-001' matches the expected format and was found in OCR block 0 which contains the complete field value.",
-                        "bounding_boxes": [
-                            {"x_min": 0.1, "y_min": 0.1, "x_max": 0.3, "y_max": 0.15}
-                        ]
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "field_1": {"type": "string"},
+                        "field_2": {"type": "string"},
+                        "field_3": {"type": "number"}
                     }
-                ],
-                "processing_time": 2.34,
-                "llm_confidence": 0.89,
-                "schema_validation_passed": True,
-                "errors": []
+                },
+                "prompts_used": {},
+                "raw_llm_response": "",
+                "llm_model_used": "gpt-4o"
             }
         }

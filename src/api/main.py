@@ -855,13 +855,13 @@ async def generate_schema(request: SchemaGenerationRequest):
 
         return SchemaGenerationResponse(
             success=True,
-            schema=result.get("schema"),
+            json_schema=result.get("schema"),
             prompts_used=result.get("prompts_used"),
             raw_llm_response=result.get("raw_llm_response"),
             llm_model_used=result.get("llm_model_used"),
         )
     except Exception as e:
-        return SchemaGenerationResponse(success=False, schema=None, prompts_used=None, raw_llm_response=None, error_message=str(e))
+        return SchemaGenerationResponse(success=False, json_schema=None, prompts_used=None, raw_llm_response=None, error_message=str(e))
 
 
 if __name__ == "__main__":
