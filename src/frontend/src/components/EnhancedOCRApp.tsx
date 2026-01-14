@@ -48,7 +48,7 @@ export function EnhancedOCRApp() {
   const [structuredResults, setStructuredResults] = useState<any>(null);
   const [schema, setSchema] = useState<Array<{id: string, name: string, description: string, type: string}>>([]);
   const [isExtractingData, setIsExtractingData] = useState(false);
-  const [azureConfigStatus, setAzureConfigStatus] = useState<'checking' | 'configured' | 'not-configured'>('checking');
+  const [openaiConfigStatus, setOpenAIConfigStatus] = useState<'checking' | 'configured' | 'not-configured'>('checking');
   const AVAILABLE_TYPES = ['block','paragraph','line','token'];
   const [selectedTypes, setSelectedTypes] = useState<string[]>(AVAILABLE_TYPES);
 
@@ -182,24 +182,24 @@ export function EnhancedOCRApp() {
       }
 
       // Check for various error conditions
-      if (errorString.includes('Azure OpenAI service not configured')) {
+      if (errorString.includes('OpenAI service not configured') || errorString.includes('Azure OpenAI service not configured')) {
         errorMessage = 'OpenAI service is not configured. Please set OPENAI_API_KEY (and OPENAI_ENDPOINT/OPENAI_DEPLOYMENT_NAME for Azure, or OPENAI_MODEL for Direct API) in your backend configuration.';
-        setAzureConfigStatus('not-configured');
+        setOpenAIConfigStatus('not-configured');
       } else if (errorString.includes('404') || errorString.includes('Resource not found') || errorString.includes('Error code: 404')) {
-        errorMessage = '🔧 OpenAI Configuration Issue: The deployment was not found. Please check:\n\n• OPENAI_DEPLOYMENT_NAME is correct\n• The deployment exists in your Azure OpenAI resource\n• The deployment is active and not deleted\n• Your endpoint URL is correct';
-        setAzureConfigStatus('not-configured');
+        errorMessage = '🔧 OpenAI Configuration Issue: The deployment was not found. Please check:\n\n• OPENAI_DEPLOYMENT_NAME is correct\n• The deployment exists in your OpenAI resource\n• The deployment is active and not deleted\n• Your endpoint URL is correct';
+        setOpenAIConfigStatus('not-configured');
       } else if (errorString.includes('401') || errorString.includes('Error code: 401')) {
         errorMessage = '🔑 Authentication Error: Please check your OPENAI_API_KEY configuration. Make sure the API key is valid and has not expired.';
-        setAzureConfigStatus('not-configured');
+        setOpenAIConfigStatus('not-configured');
       } else if (errorString.includes('403') || errorString.includes('Error code: 403')) {
-        errorMessage = '🚫 Access Denied: Please check your Azure OpenAI resource permissions and ensure your API key has the correct access rights.';
-        setAzureConfigStatus('not-configured');
+        errorMessage = '🚫 Access Denied: Please check your OpenAI resource permissions and ensure your API key has the correct access rights.';
+        setOpenAIConfigStatus('not-configured');
       } else if (errorString.includes('429') || errorString.includes('Error code: 429')) {
         errorMessage = '⏱️ Rate Limit Exceeded: Too many requests. Please wait a moment and try again.';
       } else if (errorString.includes('503') || errorString.includes('Error code: 503')) {
-        errorMessage = '⚠️ Service Unavailable: The Azure OpenAI service is currently unavailable. Please check your configuration and try again later.';
+        errorMessage = '⚠️ Service Unavailable: The OpenAI service is currently unavailable. Please check your configuration and try again later.';
       } else if (errorString.includes('Failed to extract structured data')) {
-        errorMessage = '🤖 AI Extraction Failed: There was an issue with the structured data extraction. This could be due to:\n\n• Azure OpenAI service configuration\n• Network connectivity issues\n• Document complexity\n\nPlease check your Azure OpenAI settings and try again.';
+        errorMessage = '🤖 AI Extraction Failed: There was an issue with the structured data extraction. This could be due to:\n\n• OpenAI service configuration\n• Network connectivity issues\n• Document complexity\n\nPlease check your OpenAI settings and try again.';
       } else {
         errorMessage = errorString;
       }
@@ -210,18 +210,18 @@ export function EnhancedOCRApp() {
     }
   };
 
-  const checkAzureConfig = async () => {
-    setAzureConfigStatus('checking');
+  const checkOpenAIConfig = async () => {
+    setOpenAIConfigStatus('checking');
     try {
       const healthCheck = await ApiService.checkHealth();
-      if (healthCheck.azure_openai === 'configured') {
-        setAzureConfigStatus('configured');
+      if (healthCheck.openai === 'configured') {
+        setOpenAIConfigStatus('configured');
       } else {
-        setAzureConfigStatus('not-configured');
+        setOpenAIConfigStatus('not-configured');
       }
     } catch (error) {
       console.log('Health check failed:', error);
-      setAzureConfigStatus('not-configured');
+      setOpenAIConfigStatus('not-configured');
     }
   };
 
@@ -236,9 +236,9 @@ export function EnhancedOCRApp() {
     }
   }, [selectedFile, hasOCRResults, hasStructuredResults, isProcessing]);
 
-  // Check Azure OpenAI configuration on mount
+  // Check OpenAI configuration on mount
   useEffect(() => {
-    checkAzureConfig();
+    checkOpenAIConfig();
   }, []);
 
   return (
@@ -261,7 +261,7 @@ export function EnhancedOCRApp() {
                       AI Document Extraction
                     </h1>
                     <p className="text-sm text-muted-foreground">
-                      Powered by Google Document AI & Azure OpenAI GPT-4o
+                      Powered by Google Document AI & OpenAI
                     </p>
                   </div>
                 </div>
@@ -773,31 +773,32 @@ export function EnhancedOCRApp() {
 
                               {hasOCRResults && schema.length > 0 && (
                                 <div className="pt-6 border-t space-y-4">
-                                  {(azureConfigStatus === 'not-configured' || azureConfigStatus === 'checking') && (
+                                  {(openaiConfigStatus === 'not-configured' || openaiConfigStatus === 'checking') && (
                                     <Alert variant="destructive">
                                       <AlertCircle className="h-4 w-4" />
                                       <AlertDescription className="space-y-2">
-                                        {azureConfigStatus === 'checking' ? (
+                                        {openaiConfigStatus === 'checking' ? (
                                           <>
                                             <div className="flex items-center space-x-2">
                                               <Loader2 className="h-4 w-4 animate-spin" />
-                                              <span><strong>Checking Azure OpenAI Configuration...</strong></span>
+                                              <span><strong>Checking OpenAI Configuration...</strong></span>
                                             </div>
                                           </>
                                         ) : (
                                           <>
-                                            <p><strong>Azure OpenAI Configuration Required</strong></p>
-                                            <p>To enable structured data extraction, please configure Azure OpenAI in your backend:</p>
+                                            <p><strong>OpenAI Configuration Required</strong></p>
+                                            <p>To enable structured data extraction, please configure OpenAI in your backend:</p>
                                             <ul className="list-disc list-inside text-sm space-y-1 mt-2">
                                               <li>Set <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">OPENAI_API_KEY</code></li>
-                                              <li>Set <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">OPENAI_ENDPOINT</code> (for Azure)</li>
-                                              <li>Set <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">OPENAI_DEPLOYMENT_NAME</code> (for Azure)</li>
+                                              <li>Set <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">OPENAI_ENDPOINT</code> (for Azure OpenAI)</li>
+                                              <li>Set <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">OPENAI_DEPLOYMENT_NAME</code> (for Azure OpenAI)</li>
+                                              <li>Or set <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">OPENAI_MODEL</code> (for Direct OpenAI API)</li>
                                             </ul>
                                             <div className="mt-3">
                                               <Button 
                                                 variant="outline" 
                                                 size="sm" 
-                                                onClick={checkAzureConfig}
+                                                onClick={checkOpenAIConfig}
                                               >
                                                 Re-check Configuration
                                               </Button>
@@ -810,7 +811,7 @@ export function EnhancedOCRApp() {
                                   
                                   <Button
                                     onClick={processStructuredExtraction}
-                                    disabled={isExtractingData || schema.some(field => !field.name) || azureConfigStatus !== 'configured'}
+                                    disabled={isExtractingData || schema.some(field => !field.name) || openaiConfigStatus !== 'configured'}
                                     className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 disabled:opacity-50"
                                   >
                                     {isExtractingData ? (
@@ -818,10 +819,10 @@ export function EnhancedOCRApp() {
                                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                                         Extracting Data...
                                       </>
-                                    ) : azureConfigStatus !== 'configured' ? (
+                                    ) : openaiConfigStatus !== 'configured' ? (
                                       <>
                                         <AlertCircle className="h-4 w-4 mr-2" />
-                                        Azure OpenAI Not Configured
+                                        OpenAI Not Configured
                                       </>
                                     ) : (
                                       <>

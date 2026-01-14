@@ -1,7 +1,8 @@
 <p align="center"> 
-    <h1>📄 DocuMind: Intelligent Document Data Extraction</h1>
+   <img src="Assets/20260114114550.png" align="center" height="150"></img>
 </p>
 
+<h1>📄 DocuMind: Intelligent Document Data Extraction</h1>
 <h3 align="center"> AI-powered document processing with custom schema support and visual grounding</h3>
 
 <p align="center">
@@ -180,11 +181,17 @@ VITE v7.0.4  ready in 500 ms
 
 ## Document Upload & OCR Processing
 
+![Document Upload & OCR Processing](Assets/r1.gif)
+
+
+
 - **Drag & Drop Interface**: Upload documents (PDF, PNG, JPG, TIFF) through an intuitive drag-and-drop interface
 - **Real-time Processing**: Documents are processed instantly using Google Document AI with quality assessment
 - **Visual Feedback**: Progress indicators show OCR processing status and completion
 
 ## Interactive Document Visualization
+
+![Interactive Document Visualization](Assets/r2.gif)
 
 - **Bounding Box Overlay**: View OCR results with color-coded bounding boxes for blocks, paragraphs, lines, and tokens
 - **Hover Interactions**: Hover over bounding boxes to preview text content and confidence scores
@@ -193,24 +200,40 @@ VITE v7.0.4  ready in 500 ms
 
 ## Custom Schema Generation & Builder
 
-- **Auto Schema Generation**: AI automatically generates JSON schemas from document samples
+![Custom Schema Generation & Builder](Assets/r3.gif)
+
+![Custom Schema Generation & Builder](Assets/r4.gif)
+
+- **Auto Schema Generation**: AI automatically generates JSON schemas from document samples (based on optional provided instructions)
 - **Interactive Schema Builder**: Design custom schemas with drag-and-drop field creation
 - **Field Types**: String, number, boolean, array, and nested object fields with validation
-
-## Multi-Mode Extraction
-
-Three extraction modes optimized for different needs:
-
-- **Visual Grounding**: LLM receives image + structured OCR blocks (with coordinates) → directly identifies source blocks (highest accuracy, highest cost)
-- **Text-Only (Manual Grounding)**: LLM receives full OCR text + image (no structured blocks) → backend matches extracted values to OCR blocks (60-70% cost savings)
-- **Hybrid RAG**: Stage 1: text + image extraction → Stage 2: filtered OCR blocks only (no image) → LLM grounds fields (60-80% token reduction, high accuracy)
+- **Additional Instructions**: Can add additional instructions in the prompt box to guide the extraction process
 
 ## Results Dashboard
+
+![Results Dashboard](Assets/r5.gif)
 
 - **Extracted Fields Display**: View all extracted fields with confidence scores, values, and source text blocks
 - **Bounding Box Highlights**: Visual mapping shows exactly where each field was found in the document
 - **Reasoning Tooltips**: LLM explanations for how each field was identified and extracted
 - **Quality Metrics**: Processing time, confidence averages, schema validation status, and quality grades
+
+## LLM Debug Section
+
+![LLM Debug Section](Assets/r6.gif)
+
+- **Complete Prompts View**: Inspect the exact system and user prompts sent to the LLM, including all instructions and context
+- **Multi-Stage Prompt Display**: For hybrid extraction mode, view Stage 1 and Stage 2 prompts separately in organized tabs
+- **Raw LLM Response**: See the exact JSON response from the AI model before any backend post-processing or validation
+- **Stage-Separated Responses**: In hybrid mode, view raw responses from both Stage 1 (initial extraction) and Stage 2 (grounding) in separate tabs
+
+### Multi-Mode Extraction
+
+Three extraction modes optimized for different needs:
+
+- **Visual Grounding**: LLM receives image + all OCR blocks (with coordinates) → directly identifies source blocks (highest accuracy, highest cost)
+- **Text-Only (Manual Grounding)**: LLM receives full OCR text + image (no OCR blocks) → backend matches extracted values to OCR blocks (60-70% cost savings, lower accuracy)
+- **Hybrid RAG**: Stage 1: text + image extraction → Stage 2: filtered OCR blocks only (no image) → LLM grounds fields (60-80% token reduction, higher accuracy)
 
 ---
 
@@ -264,7 +287,7 @@ Three extraction modes optimized for different needs:
 ┌─────────────────┐  ┌─────────────────────────────────────────────┐
 │  GOOGLE CLOUD   │  │         OPENAI API                        │
 │  DOCUMENT AI    │  │  ┌─────────────────────────────────────┐   │
-│                 │  │  │  GPT-4o / GPT-4o-mini Models         │   │
+│                 │  │  │  GPT Models         │   │
 │  • OCR Engine   │  │  │  • Structured Extraction             │   │
 │  • Layout Parse │  │  │  • Visual Grounding                  │   │
 │  • Quality Score│  │  │  • Schema Generation                 │   │
@@ -306,7 +329,7 @@ Document Image → Google OCR → OpenAI (Image + Structured OCR Blocks)
 
 ### 2. Text-Only Mode (Manual Grounding)
 ```
-Document Image → Google OCR → OpenAI (Full Text + Image, no structured blocks)
+Document Image → Google OCR → OpenAI (Full Text + Image, no ocr blocks)
                                     ↓
                         LLM returns extracted_data (no field_mappings)
                                     ↓
@@ -338,42 +361,6 @@ Document Image → Google OCR
 **Stage 2 LLM receives**: Full text + filtered structured blocks (no image)  
 **Stage 2 LLM returns**: field_mappings (field → source_block_id)  
 **Cost savings**: 60-80% token reduction vs Visual Grounding (no image in stage 2, filtered blocks only)
-
-## 🛠️ Component Details
-
-### Document OCR Processor
-- Integrates with Google Document AI for OCR
-- Extracts text blocks with bounding boxes at block, paragraph, line, and token levels
-- Performs image quality assessment with defect detection
-- Returns structured `DocumentOCRResult` with confidence scores
-
-### Visually Grounded Extractor
-- Sends image + structured OCR blocks (with coordinates) to LLM
-- LLM directly returns field_mappings linking fields to source block IDs
-- Highest accuracy, highest cost
-
-### Manual Visual Grounder
-- Used after LLM extraction from text + image (no structured blocks in prompt)
-- Maps extracted values to OCR blocks using fuzzy string matching and pattern recognition
-- Provides 60-70% cost savings by avoiding structured OCR block data in LLM prompt
-
-### Hybrid Grounding Service (RAG)
-- **Stage 1**: LLM extracts from full text + image → extracted_data + reasoning_map
-- **Block filtering**: Semantic + lexical matching identifies top-K relevant OCR blocks
-- **Stage 2**: LLM grounds fields using full text + filtered blocks (no image) → field_mappings
-- Achieves 60-80% token reduction vs Visual Grounding while maintaining high accuracy
-
-### Image Quality Assessment
-- Utilizes Google Document AI's built-in quality scores
-- Detects defects: blur, glare, low resolution, noise, rotation
-- Provides actionable recommendations for image improvement
-- Quality grades: Excellent (90%+), Good (75%+), Fair (60%+), Poor (<60%)
-
-### Schema Builder & Generator
-- **Auto-generation**: AI creates schemas from document samples via `/schema/generate`
-- **Interactive builder**: Drag-and-drop custom schema design
-- **Templates**: Pre-built schemas for common document types
-- **Validation**: Real-time schema validation with instant feedback
 
 ---
 

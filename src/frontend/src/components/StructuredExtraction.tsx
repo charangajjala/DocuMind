@@ -222,7 +222,7 @@ export function StructuredExtraction({
             <span>AI-Powered Structured Extraction</span>
           </CardTitle>
           <CardDescription>
-            Extract structured data using Azure OpenAI GPT-4o with visual grounding
+            Extract structured data using OpenAI GPT-4o with visual grounding
           </CardDescription>
         </CardHeader>
         

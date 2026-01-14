@@ -45,7 +45,7 @@ export function ImprovedOCRApp() {
   const [schema, setSchema] = useState<any>(null);
   const [schemaBuilderKey, setSchemaBuilderKey] = useState<number>(0);
   const [isExtractingData, setIsExtractingData] = useState(false);
-  const [azureConfigStatus, setAzureConfigStatus] = useState<'checking' | 'configured' | 'not-configured'>('checking');
+  const [openaiConfigStatus, setOpenAIConfigStatus] = useState<'checking' | 'configured' | 'not-configured'>('checking');
   const [hoveredField, setHoveredField] = useState<string | null>(null);
   const [hoveredTextBlock, setHoveredTextBlock] = useState<number | null>(null);
   const [userPrompt, setUserPrompt] = useState<string>('');
@@ -257,12 +257,12 @@ export function ImprovedOCRApp() {
         errorString = String(error);
       }
 
-      if (errorString.includes('Azure OpenAI service not configured')) {
+      if (errorString.includes('OpenAI service not configured') || errorString.includes('Azure OpenAI service not configured')) {
         errorMessage = 'OpenAI service is not configured. Please set OPENAI_API_KEY (and OPENAI_ENDPOINT/OPENAI_DEPLOYMENT_NAME for Azure, or OPENAI_MODEL for Direct API) in your backend configuration.';
-        setAzureConfigStatus('not-configured');
+        setOpenAIConfigStatus('not-configured');
       } else if (errorString.includes('404') || errorString.includes('Resource not found') || errorString.includes('Error code: 404')) {
-        errorMessage = '🔧 Azure OpenAI Configuration Issue: The deployment was not found. Please check your configuration.';
-        setAzureConfigStatus('not-configured');
+        errorMessage = '🔧 OpenAI Configuration Issue: The deployment was not found. Please check your configuration.';
+        setOpenAIConfigStatus('not-configured');
       } else {
         errorMessage = errorString;
       }
@@ -273,8 +273,8 @@ export function ImprovedOCRApp() {
     }
   };
 
-  const checkAzureConfig = async () => {
-    setAzureConfigStatus('checking');
+  const checkOpenAIConfig = async () => {
+    setOpenAIConfigStatus('checking');
     try {
       console.log('🔄 Health Check Request:', {
         timestamp: new Date().toISOString()
@@ -284,10 +284,10 @@ export function ImprovedOCRApp() {
       
       console.log('✅ Health Check Response from backend:', healthCheck);
       
-      if (healthCheck.azure_openai === 'configured') {
-        setAzureConfigStatus('configured');
+      if (healthCheck.openai === 'configured') {
+        setOpenAIConfigStatus('configured');
       } else {
-        setAzureConfigStatus('not-configured');
+        setOpenAIConfigStatus('not-configured');
       }
     } catch (error) {
       console.log('❌ Health check failed:', {
@@ -295,12 +295,12 @@ export function ImprovedOCRApp() {
         errorMessage: error instanceof Error ? error.message : 'Unknown error',
         timestamp: new Date().toISOString()
       });
-      setAzureConfigStatus('not-configured');
+      setOpenAIConfigStatus('not-configured');
     }
   };
 
   useEffect(() => {
-    checkAzureConfig();
+    checkOpenAIConfig();
   }, []);
 
   return (
@@ -323,17 +323,17 @@ export function ImprovedOCRApp() {
                       AI Document Extraction
                     </h1>
                     <p className="text-sm text-muted-foreground">
-                      Powered by Google Document AI & Azure OpenAI GPT-4o
+                      Powered by Google Document AI & OpenAI
                     </p>
                   </div>
                 </div>
               </div>
               <div className="flex items-center space-x-4">
                 <Badge 
-                  variant={azureConfigStatus === 'configured' ? 'default' : 'destructive'}
+                  variant={openaiConfigStatus === 'configured' ? 'default' : 'destructive'}
                   className="text-xs"
                 >
-                  Azure OpenAI: {azureConfigStatus}
+                  OpenAI: {openaiConfigStatus}
                 </Badge>
                 <div className="flex items-center gap-4">
                   <span className="text-xs text-muted-foreground">Model</span>

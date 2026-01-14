@@ -45,7 +45,7 @@ try:
         
         if api_key:
             if endpoint and deployment:
-                # Azure OpenAI
+                # OpenAI via Azure (endpoint + deployment)
                 llm_providers[default_llm_model] = AzureOpenAIService(
                     api_key=api_key,
                     endpoint=endpoint,
@@ -53,7 +53,7 @@ try:
                     api_version=config.get_config('OPENAI_API_VERSION', '2025-01-01-preview')
                 )
             else:
-                # Direct OpenAI API
+                # OpenAI Direct API
                 llm_providers[default_llm_model] = AzureOpenAIService(
                     api_key=api_key,
                     base_url=base_url,
@@ -63,7 +63,7 @@ try:
         for model_key, cfg in available.items():
             try:
                 if cfg.get('endpoint') and cfg.get('deployment'):
-                    # Azure OpenAI
+                    # OpenAI via Azure (endpoint + deployment)
                     llm_providers[model_key] = AzureOpenAIService(
                         api_key=cfg['api_key'],
                         endpoint=cfg['endpoint'],
@@ -71,7 +71,7 @@ try:
                         api_version=cfg.get('api_version') or '2025-01-01-preview'
                     )
                 else:
-                    # Direct OpenAI API
+                    # OpenAI Direct API
                     llm_providers[model_key] = AzureOpenAIService(
                         api_key=cfg['api_key'],
                         base_url=cfg.get('base_url'),
@@ -143,14 +143,14 @@ async def health_check():
         # Basic configuration validation
         config.validate_required_config()
         
-        # Check Azure OpenAI configuration
-        azure_configured = structured_extractor is not None
+        # Check OpenAI configuration
+        openai_configured = structured_extractor is not None
         
         return {
             "status": "healthy",
             "service": "document-ocr-api",
             "google_document_ai": "configured",
-            "openai": "configured" if azure_configured else "not_configured"
+            "openai": "configured" if openai_configured else "not_configured"
         }
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Service unhealthy: {str(e)}")

@@ -171,7 +171,7 @@ export class ApiService {
     return this.handleResponse(response);
   }
 
-  static async checkHealth(): Promise<{ status: string; service: string; google_document_ai: string; azure_openai: string }> {
+  static async checkHealth(): Promise<{ status: string; service: string; google_document_ai: string; openai: string }> {
     const response = await fetch(`${API_BASE_URL}/health`);
     return this.handleResponse(response);
   }
