@@ -17,6 +17,66 @@
 
 ---
 
+# ▶️ Demo
+
+## Document Upload & OCR Processing
+
+![Document Upload & OCR Processing](Assets/r1.gif)
+
+
+
+- **Drag & Drop Interface**: Upload documents (PDF, PNG, JPG, TIFF) through an intuitive drag-and-drop interface
+- **Real-time Processing**: Documents are processed instantly using Google Document AI with quality assessment
+- **Visual Feedback**: Progress indicators show OCR processing status and completion
+
+## Interactive Document Visualization
+
+![Interactive Document Visualization](Assets/r2.gif)
+
+- **Bounding Box Overlay**: View OCR results with color-coded bounding boxes for blocks, paragraphs, lines, and tokens
+- **Hover Interactions**: Hover over bounding boxes to preview text content and confidence scores
+- **Element Filtering**: Toggle visibility of different text elements (blocks, paragraphs, lines, tokens)
+- **Click Selection**: Click bounding boxes to highlight corresponding text in the results panel
+
+## Custom Schema Generation & Builder
+
+![Custom Schema Generation & Builder](Assets/r3.gif)
+
+![Custom Schema Generation & Builder](Assets/r4.gif)
+
+- **Auto Schema Generation**: AI automatically generates JSON schemas from document samples (based on optional provided instructions)
+- **Interactive Schema Builder**: Design custom schemas with drag-and-drop field creation
+- **Field Types**: String, number, boolean, array, and nested object fields with validation
+- **Additional Instructions**: Can add additional instructions in the prompt box to guide the extraction process
+
+## Results Dashboard
+
+![Results Dashboard](Assets/r5.gif)
+
+- **Extracted Fields Display**: View all extracted fields with confidence scores, values, and source text blocks
+- **Bounding Box Highlights**: Visual mapping shows exactly where each field was found in the document
+- **Reasoning Tooltips**: LLM explanations for how each field was identified and extracted
+- **Quality Metrics**: Processing time, confidence averages, schema validation status, and quality grades
+
+## LLM Debug Section
+
+![LLM Debug Section](Assets/r6.gif)
+
+- **Complete Prompts View**: Inspect the exact system and user prompts sent to the LLM, including all instructions and context
+- **Multi-Stage Prompt Display**: For hybrid extraction mode, view Stage 1 and Stage 2 prompts separately in organized tabs
+- **Raw LLM Response**: See the exact JSON response from the AI model before any backend post-processing or validation
+- **Stage-Separated Responses**: In hybrid mode, view raw responses from both Stage 1 (initial extraction) and Stage 2 (grounding) in separate tabs
+
+### Multi-Mode Extraction
+
+Three extraction modes optimized for different needs:
+
+- **Visual Grounding**: LLM receives image + all OCR blocks (with coordinates) → directly identifies source blocks (highest accuracy, highest cost)
+- **Text-Only (Manual Grounding)**: LLM receives full OCR text + image (no OCR blocks) → backend matches extracted values to OCR blocks (60-70% cost savings, lower accuracy)
+- **Hybrid RAG**: Stage 1: text + image extraction → Stage 2: filtered OCR blocks only (no image) → LLM grounds fields (60-80% token reduction, higher accuracy)
+
+---
+
 # 🖥️ Installation & Setup ⚙️
 
 ### Prerequisites
@@ -174,66 +234,6 @@ VITE v7.0.4  ready in 500 ms
 2. You should see the Document OCR interface
 3. Try uploading a test image (invoice, receipt, or any document)
 4. If everything works, you'll see OCR results with bounding boxes!
-
----
-
-# ▶️ Demo
-
-## Document Upload & OCR Processing
-
-![Document Upload & OCR Processing](Assets/r1.gif)
-
-
-
-- **Drag & Drop Interface**: Upload documents (PDF, PNG, JPG, TIFF) through an intuitive drag-and-drop interface
-- **Real-time Processing**: Documents are processed instantly using Google Document AI with quality assessment
-- **Visual Feedback**: Progress indicators show OCR processing status and completion
-
-## Interactive Document Visualization
-
-![Interactive Document Visualization](Assets/r2.gif)
-
-- **Bounding Box Overlay**: View OCR results with color-coded bounding boxes for blocks, paragraphs, lines, and tokens
-- **Hover Interactions**: Hover over bounding boxes to preview text content and confidence scores
-- **Element Filtering**: Toggle visibility of different text elements (blocks, paragraphs, lines, tokens)
-- **Click Selection**: Click bounding boxes to highlight corresponding text in the results panel
-
-## Custom Schema Generation & Builder
-
-![Custom Schema Generation & Builder](Assets/r3.gif)
-
-![Custom Schema Generation & Builder](Assets/r4.gif)
-
-- **Auto Schema Generation**: AI automatically generates JSON schemas from document samples (based on optional provided instructions)
-- **Interactive Schema Builder**: Design custom schemas with drag-and-drop field creation
-- **Field Types**: String, number, boolean, array, and nested object fields with validation
-- **Additional Instructions**: Can add additional instructions in the prompt box to guide the extraction process
-
-## Results Dashboard
-
-![Results Dashboard](Assets/r5.gif)
-
-- **Extracted Fields Display**: View all extracted fields with confidence scores, values, and source text blocks
-- **Bounding Box Highlights**: Visual mapping shows exactly where each field was found in the document
-- **Reasoning Tooltips**: LLM explanations for how each field was identified and extracted
-- **Quality Metrics**: Processing time, confidence averages, schema validation status, and quality grades
-
-## LLM Debug Section
-
-![LLM Debug Section](Assets/r6.gif)
-
-- **Complete Prompts View**: Inspect the exact system and user prompts sent to the LLM, including all instructions and context
-- **Multi-Stage Prompt Display**: For hybrid extraction mode, view Stage 1 and Stage 2 prompts separately in organized tabs
-- **Raw LLM Response**: See the exact JSON response from the AI model before any backend post-processing or validation
-- **Stage-Separated Responses**: In hybrid mode, view raw responses from both Stage 1 (initial extraction) and Stage 2 (grounding) in separate tabs
-
-### Multi-Mode Extraction
-
-Three extraction modes optimized for different needs:
-
-- **Visual Grounding**: LLM receives image + all OCR blocks (with coordinates) → directly identifies source blocks (highest accuracy, highest cost)
-- **Text-Only (Manual Grounding)**: LLM receives full OCR text + image (no OCR blocks) → backend matches extracted values to OCR blocks (60-70% cost savings, lower accuracy)
-- **Hybrid RAG**: Stage 1: text + image extraction → Stage 2: filtered OCR blocks only (no image) → LLM grounds fields (60-80% token reduction, higher accuracy)
 
 ---
 
